@@ -201,7 +201,7 @@ export class HighDensityRouteSpatialIndex {
     segmentStart: Point, // Keep Point for original Z data if needed elsewhere
     segmentEnd: Point,
     margin: number, // Minimum required clearance
-  ): Array<{ conflictingRoute: HighDensityRoute; distance: number }> {
+  ): Array<{ conflictingRoute: HighDensityRoute; distance: number; copperRadius: number }> {
     const querySegment: Segment = [segmentStart, segmentEnd]
     const bounds = getSegmentBounds(querySegment)
 
@@ -224,7 +224,7 @@ export class HighDensityRouteSpatialIndex {
     // Use a map to store the minimum squared distance found *per route*
     const conflictingRouteData = new Map<
       string,
-      { route: HighDensityRoute; minDistSq: number }
+      { route: HighDensityRoute; minDistSq: number; copperRadius: number }
     >()
     const checkedSegments = new Set<string>() // Store segmentId
     const checkedVias = new Set<string>() // Store viaId
@@ -276,6 +276,7 @@ export class HighDensityRouteSpatialIndex {
                 conflictingRouteData.set(routeName, {
                   route,
                   minDistSq: distSq,
+                  copperRadius: route.traceThickness / 2,
                 })
               }
             }
@@ -307,6 +308,7 @@ export class HighDensityRouteSpatialIndex {
                 conflictingRouteData.set(routeName, {
                   route,
                   minDistSq: distSq,
+                  copperRadius: route.viaDiameter / 2,
                 })
               }
             }
@@ -319,12 +321,15 @@ export class HighDensityRouteSpatialIndex {
     const results: Array<{
       conflictingRoute: HighDensityRoute
       distance: number
+      copperRadius: number
     }> = []
     for (const data of conflictingRouteData.values()) {
-      // Distance reported is centerline-to-centerline (or point)
+      // Distance reported is centerline-to-centerline (or to the via centre);
+      // copperRadius says how much of it is copper
       results.push({
         conflictingRoute: data.route,
         distance: Math.sqrt(data.minDistSq),
+        copperRadius: data.copperRadius,
       })
     }
 
@@ -453,7 +458,12 @@ export class HighDensityRouteSpatialIndex {
   getConflictingRoutesNearPoint(
     point: Point3,
     margin: number, // Minimum required clearance
-  ): Array<{ conflictingRoute: HighDensityRoute; distance: number }> {
+  ): Array<{
+    conflictingRoute: HighDensityRoute
+    distance: number
+    /** Radius of the conflicting copper (half the trace width, or the via radius) */
+    copperRadius: number
+  }> {
     // --- Define search area ---
     const broadPhaseMargin = margin + this.maximumCopperRadius
     const searchMinX = point.x - broadPhaseMargin
@@ -469,7 +479,7 @@ export class HighDensityRouteSpatialIndex {
 
     const conflictingRouteData = new Map<
       string,
-      { route: HighDensityRoute; minDistSq: number }
+      { route: HighDensityRoute; minDistSq: number; copperRadius: number }
     >()
     const checkedSegments = new Set<string>()
     const checkedVias = new Set<string>()
@@ -515,6 +525,7 @@ export class HighDensityRouteSpatialIndex {
                 conflictingRouteData.set(routeName, {
                   route,
                   minDistSq: distSq,
+                  copperRadius: route.traceThickness / 2,
                 })
               }
             }
@@ -544,6 +555,7 @@ export class HighDensityRouteSpatialIndex {
                 conflictingRouteData.set(routeName, {
                   route,
                   minDistSq: distSq,
+                  copperRadius: route.viaDiameter / 2,
                 })
               }
             }
@@ -556,12 +568,14 @@ export class HighDensityRouteSpatialIndex {
     const results: Array<{
       conflictingRoute: HighDensityRoute
       distance: number
+      copperRadius: number
     }> = []
     for (const data of conflictingRouteData.values()) {
       // Distance reported is point-to-segment-centerline or point-to-via-center
       results.push({
         conflictingRoute: data.route,
         distance: Math.sqrt(data.minDistSq),
+        copperRadius: data.copperRadius,
       })
     }
 

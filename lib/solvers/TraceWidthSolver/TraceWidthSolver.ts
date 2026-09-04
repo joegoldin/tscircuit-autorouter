@@ -429,7 +429,7 @@ export class TraceWidthSolver extends BaseSolver {
       searchRadius,
     )
 
-    for (const { conflictingRoute, distance } of nearbyRoutes) {
+    for (const { conflictingRoute, distance, copperRadius } of nearbyRoutes) {
       const routeRootName =
         conflictingRoute.rootConnectionName ?? conflictingRoute.connectionName
 
@@ -441,8 +441,10 @@ export class TraceWidthSolver extends BaseSolver {
         continue
       }
 
-      const otherTraceHalfWidth = (conflictingRoute.traceThickness ?? 0.15) / 2
-      const clearance = distance - otherTraceHalfWidth
+      // the nearest copper of the other route may be a via, which is wider than its trace
+      const otherCopperRadius =
+        copperRadius ?? (conflictingRoute.traceThickness ?? 0.15) / 2
+      const clearance = distance - otherCopperRadius
 
       // Track routes that would violate clearance (width/2 + margin)
       const requiredTraceClearance =

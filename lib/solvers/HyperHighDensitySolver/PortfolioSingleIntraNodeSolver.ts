@@ -432,7 +432,7 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         cellSizeMm: 0.1,
         viaDiameter: this.constructorParams.viaDiameter ?? 0.3,
         viaMinDistFromBorder: (this.constructorParams.viaDiameter ?? 0.3) / 2,
-        traceMargin: 0.1,
+        traceMargin: this.constructorParams.obstacleMargin ?? 0.15,
         traceThickness: this.constructorParams.traceWidth ?? 0.15,
         effort: this.effort,
         hyperParameters: {
@@ -449,7 +449,7 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         lowResolutionCellSize: 0.4,
         viaDiameter: this.constructorParams.viaDiameter ?? 0.3,
         viaMinDistFromBorder: (this.constructorParams.viaDiameter ?? 0.3) / 2,
-        traceMargin: 0.1,
+        traceMargin: this.constructorParams.obstacleMargin ?? 0.15,
         // This likely needs to be corrected to use the actual trace width-
         // but using anything but 0.1 for traceThickness is causing issues
         // needs more debugging- repro01 in the high-density-a01 repo
