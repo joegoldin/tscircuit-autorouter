@@ -193,10 +193,26 @@ export class MultiGraphTopologyPlannerSolver extends BasePipelineSolver<MultiGra
     )
   }
 
-  /** Adapts the global no-connection SRJ into the RectDiffPipeline input shape. */
+  /**
+   * Adapts the global no-connection SRJ into the RectDiffPipeline input shape.
+   *
+   * Obstacles are grown by half the obstacle margin: the mesh nodes then stop half a margin
+   * short of the copper, and the node solvers keep their traces half a margin (plus the trace
+   * radius) inside their node edges, so copper in a node ends up a full margin away from the
+   * obstacle, the same distance it keeps from copper in a neighbouring node.
+   */
   private getGlobalTopologySolverInput() {
+    const srj = this.normalizedInput.globalNoConnectionSrj
+    const grow = (this.inputProblem.obstacleMargin ?? 0.15) / 2
     return {
-      simpleRouteJson: this.normalizedInput.globalNoConnectionSrj as any,
+      simpleRouteJson: {
+        ...srj,
+        obstacles: srj.obstacles.map((obstacle) => ({
+          ...obstacle,
+          width: obstacle.width + 2 * grow,
+          height: obstacle.height + 2 * grow,
+        })),
+      } as any,
       maxGapFillPasses: 4,
     }
   }

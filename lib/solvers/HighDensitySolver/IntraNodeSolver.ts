@@ -354,7 +354,10 @@ export class IntraNodeRouteSolver extends BaseSolver {
     const availableZ = this.getAvailableZLayers()
 
     for (const route of this.solvedRoutes) {
-      const margin = route.viaDiameter / 2 + this.POSTROUTE_VIA_TRACE_CLEARANCE
+      // accepted node solutions must meet the configured margin, not a fixed 0.1 mm
+      const margin =
+        route.viaDiameter / 2 +
+        Math.max(this.POSTROUTE_VIA_TRACE_CLEARANCE, this.obstacleMargin)
 
       for (const via of route.vias) {
         for (const z of availableZ) {

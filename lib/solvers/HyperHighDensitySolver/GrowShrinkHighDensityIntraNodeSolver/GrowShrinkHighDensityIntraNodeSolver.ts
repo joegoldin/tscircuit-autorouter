@@ -152,12 +152,23 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
   private createActiveSubSolver() {
     const { growShrinkSolutionValidator: _, ...portfolioParams } =
       this.constructorParams
+    const s = this.scaleFactor
+    const center = this.nodeWithPortPoints.center
+    // The node is routed at s times its size and the solution is scaled back by 1/s, so the
+    // copper sizes, the margin and the obstacles must be scaled up by s too; otherwise every
+    // clearance in the accepted solution is 1/s of what was asked for.
     this.activeSubSolver = new PortfolioSingleIntraNodeSolver({
       ...portfolioParams,
-      nodeWithPortPoints: scaleNodeWithPortPoints(
-        this.nodeWithPortPoints,
-        this.scaleFactor,
-      ),
+      nodeWithPortPoints: scaleNodeWithPortPoints(this.nodeWithPortPoints, s),
+      traceWidth: (portfolioParams.traceWidth ?? 0.15) * s,
+      viaDiameter: (portfolioParams.viaDiameter ?? 0.3) * s,
+      obstacleMargin: (portfolioParams.obstacleMargin ?? 0.15) * s,
+      obstacles: portfolioParams.obstacles?.map((obstacle) => ({
+        ...obstacle,
+        center: scalePoint(obstacle.center, center, s),
+        width: obstacle.width * s,
+        height: obstacle.height * s,
+      })),
     })
     if (this.constructorParams.maxInnerIterationsPerGrowthAttempt) {
       this.activeSubSolver.MAX_ITERATIONS =
@@ -169,13 +180,15 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
     const solvedRoutes =
       this.scaleFactor === 1
         ? solver.solvedRoutes
-        : solver.solvedRoutes.map((route) =>
-            scaleRoute(
+        : solver.solvedRoutes.map((route) => ({
+            ...scaleRoute(
               route,
               this.nodeWithPortPoints.center,
               1 / this.scaleFactor,
             ),
-          )
+            traceThickness: route.traceThickness / this.scaleFactor,
+            viaDiameter: route.viaDiameter / this.scaleFactor,
+          }))
     if (
       this.constructorParams.growShrinkSolutionValidator &&
       !this.constructorParams.growShrinkSolutionValidator(solvedRoutes)

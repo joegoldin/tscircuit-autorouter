@@ -354,9 +354,11 @@ export class SingleHighDensityRouteSolver extends BaseSolver {
   }
 
   isNodeTooCloseToEdge(node: Node, isVia?: boolean) {
+    // Half the margin on each side of a node edge gives the full margin between the copper of
+    // neighbouring nodes; the copper's own radius must be counted too.
     const margin = isVia
       ? this.viaDiameter / 2 + this.obstacleMargin / 2
-      : this.obstacleMargin / 2
+      : this.traceThickness / 2 + this.obstacleMargin / 2
     const tooClose =
       node.x < this.bounds.minX + margin ||
       node.x > this.bounds.maxX - margin ||
