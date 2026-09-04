@@ -494,6 +494,8 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         connMap: this.connMap,
         hyperParameters: hyperParameters,
         viaDiameter: this.constructorParams.viaDiameter,
+        traceWidth: this.constructorParams.traceWidth,
+        obstacleMargin: this.constructorParams.obstacleMargin,
       }) as any
     }
     return new CachedIntraNodeRouteSolver({
