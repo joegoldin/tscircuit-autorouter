@@ -16,9 +16,30 @@ const uniqueAvailableZ = (node: NodeWithPortPoints) => {
 
 export const hasImpossibleSameLayerCrossingGeometry = (
   node: NodeWithPortPoints,
-) =>
-  uniqueAvailableZ(node).length === 1 &&
-  getIntraNodeCrossingsUsingCircle(node).numSameLayerCrossings > 0
+): boolean => {
+  if (uniqueAvailableZ(node).length !== 1) return false
+  const connections = new Map<string, PortPoint[]>()
+  for (const point of node.portPoints) {
+    const points = connections.get(point.connectionName) ?? []
+    points.push(point)
+    connections.set(point.connectionName, points)
+  }
+  const pairs = [...connections.values()]
+  for (let i = 0; i < pairs.length; i++) {
+    const first = pairs[i]!
+    const firstRoot = first[0]!.rootConnectionName ?? first[0]!.connectionName
+    for (let j = i + 1; j < pairs.length; j++) {
+      const second = pairs[j]!
+      const secondRoot = second[0]!.rootConnectionName ?? second[0]!.connectionName
+      if (firstRoot === secondRoot) continue
+      if (getIntraNodeCrossingsUsingCircle({
+        ...node,
+        portPoints: [...first, ...second],
+      }).numSameLayerCrossings > 0) return true
+    }
+  }
+  return false
+}
 
 export const createInvalidDirectConnectionRoutes = (
   node: NodeWithPortPoints,
