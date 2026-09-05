@@ -38,6 +38,28 @@ no retry or congestion policy has been adopted into production. Preserve true
 copper sizes and clearance throughout. Do not replace this with autoplacement,
 manual copper repairs, or geometry inflation.
 
+Further measured progress:
+
+- Penalizing each congested region's estimated via demand
+  (`2 * sameLayerCrossings + crossLayerCrossings + entryExitLayerChanges`)
+  removes the eight crossings. The resulting fixture has one 0.124945 mm
+  trace-to-pad clearance at `(3.943969, 1.098252)`, net 24 versus pad 79.
+  The experiment intercepts Tiny's cost calculation before solver construction;
+  it is not a production implementation. Permission to create a source fork of
+  `tiny-hypergraph` for the required cost hook has been requested.
+- Repair commit `51c14dc1` scores errors using their numeric declared and actual
+  clearance. Previously the 0.125 mm gap had zero severity because message-based
+  scoring assumed a 0.1 mm rule. Its regression passes; the full repair suite
+  reports 82 passes and the same four baseline snapshot failures.
+- A separate GlobalDrcForceImprove solve with coupled broad forces clears that
+  remaining error. The normal Pipeline 7 configuration still leaves it: targeted
+  pad repair alone replaces the pad error with a worse neighbor-trace error.
+  A small two-route reproduction exists only in scratch. Localized single-route
+  movement was tested and reverted because it did not solve the coupled problem.
+- Neither the congestion loop nor coupled repair has yet been integrated and
+  verified end to end. The routed board and independent KiCad/shorts checks must
+  still be regenerated; do not deliver the scratch result as the finished board.
+
 Branch: `jlcpcb-clearance` on https://github.com/joegoldin/tscircuit-autorouter (fork of
 tscircuit/tscircuit-autorouter, npm `@tscircuit/capacity-autorouter`, forked at v0.0.875).
 
