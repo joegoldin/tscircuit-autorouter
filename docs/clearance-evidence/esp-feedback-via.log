@@ -1,0 +1,48 @@
+progress 0 0 1
+progress 0 12 476318
+progress 0 12 829303
+result 0 false Pipeline7 final clearance validation failed: 8 issue(s). PCB trace source_net_27_mst1_0 overlaps with PCB trace source_net_24_mst1_0 (accidental contact) 8
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ]
+]
+progress 1 0 1
+progress 1 12 406429
+progress 1 12 685365
+result 1 false Pipeline7 final clearance validation failed: 1 issue(s). PCB trace source_net_24_mst1_0 is too close to pcb_smtpad "pcb_smtpad_79" (gap: 0.125mm) 1
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ], [ "topology_merge_423", 0.5 ], [
+    "cmn_385", 0.5
+  ]
+]
+progress 2 0 1
+progress 2 12 186422
+progress 2 12 479801
+progress 2 16 726686
+result 2 false Pipeline7 final clearance validation failed: 1 issue(s). PCB trace source_net_24_mst1_0 is too close to pcb_smtpad "pcb_smtpad_79" (gap: 0.125mm) 1
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ], [ "topology_merge_423", 1 ], [ "cmn_385",
+    1
+  ]
+]
+progress 3 0 1
+progress 3 12 185984
+progress 3 12 468029
+progress 3 12 722504
+result 3 false Pipeline7 final clearance validation failed: 1 issue(s). PCB trace source_net_24_mst1_0 is too close to pcb_smtpad "pcb_smtpad_79" (gap: 0.125mm) 1
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ], [ "topology_merge_423", 1.5 ], [
+    "cmn_385", 1.5
+  ]
+]
+progress 4 0 1
+progress 4 12 185984
+progress 4 12 468728
+progress 4 12 722100
+result 4 false Pipeline7 final clearance validation failed: 1 issue(s). PCB trace source_net_24_mst1_0 is too close to pcb_smtpad "pcb_smtpad_79" (gap: 0.125mm) 1
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ], [ "topology_merge_423", 2 ], [ "cmn_385",
+    2
+  ]
+]
+progress 5 0 1
+progress 5 12 185984

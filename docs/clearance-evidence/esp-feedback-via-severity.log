@@ -1,0 +1,12 @@
+progress 0 0 1
+progress 0 12 432570
+progress 0 19 753264
+result 0 false Pipeline7 final clearance validation failed: 1 issue(s). PCB trace source_net_24_mst1_0 is too close to pcb_smtpad "pcb_smtpad_79" (gap: 0.125mm) 1
+penalties [
+  [ "cmn_7", 0.5 ], [ "cmn_17__sub_2_0", 0.5 ], [ "topology_merge_423", 0.5 ], [
+    "cmn_385", 0.5
+  ]
+]
+progress 1 0 1
+progress 1 12 225435
+progress 1 12 539154
