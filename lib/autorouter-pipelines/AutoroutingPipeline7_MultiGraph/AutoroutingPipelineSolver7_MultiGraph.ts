@@ -24,6 +24,7 @@ import { getColorMap } from "lib/solvers/colors"
 import {
   CapacityMeshEdge,
   CapacityMeshNode,
+  CapacityMeshNodeId,
   SimpleRouteConnection,
   SimpleRouteJson,
   SimplifiedPcbTraces,
@@ -75,6 +76,7 @@ import { PowerTraceExpansionSolver } from "./PowerTraceExpansionSolver"
 import { convertPipeline7HdRoutesToSimplifiedPcbTraces } from "./convertPipeline7HdRoutesToSimplifiedPcbTraces"
 import { createPipeline7AutoroutingDrcEvaluator } from "./create-pipeline7-autorouting-drc-evaluator"
 import { getPowerTraceExpansionConnectionNames } from "./getPowerTraceExpansionConnectionNames"
+import { getClearanceFeedbackNodeIds } from "./get-clearance-feedback-node-ids"
 import { lockHdRouteTerminals } from "./lock-hd-route-terminals"
 import { preparePipeline7PowerTraceExpansionInput } from "./prepare-pipeline7-power-trace-expansion-input"
 
@@ -88,8 +90,12 @@ interface CapacityMeshSolverOptions {
   minNodeArea?: number
   visualizationTraceColorMode?: TraceColorMode
   powerTraceExpansion?: PowerTraceExpanderOptions
+  clearanceFeedbackMaxAttempts?: number
 }
 export type AutoroutingPipelineSolverOptions = CapacityMeshSolverOptions
+
+const DEFAULT_CLEARANCE_FEEDBACK_MAX_ATTEMPTS = 12
+const CLEARANCE_FEEDBACK_PENALTY_INCREMENT = 0.5
 
 type PipelineStep<T extends new (...args: any[]) => BaseSolver> = {
   solverName: string
@@ -260,12 +266,17 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   connMap!: ConnectivityMap
   srjWithEscapeViaLocations?: SimpleRouteJson
   srjWithPointPairs?: SimpleRouteJson
-  originalSrj: SimpleRouteJson
+  readonly originalSrj: SimpleRouteJson
   capacityNodes: CapacityMeshNode[] | null = null
   capacityEdges: CapacityMeshEdge[] | null = null
   /** Available segment points after non-component cramped points are filtered. */
   sharedEdgeSegmentsWithNecessaryCrampedPortPoints?: SharedEdgeSegment[]
   highDensityNodePortPoints?: NodeWithPortPoints[]
+  readonly clearanceFeedbackMaxAttempts: number
+  readonly clearanceFeedbackPenaltyByNodeId = new Map<
+    CapacityMeshNodeId,
+    number
+  >()
 
   cacheProvider: CacheProvider | null = null
   pipelineDef = [
@@ -273,7 +284,7 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
       "preprocessSimpleRouteJsonSolver",
       PreprocessSimpleRouteJsonSolver,
       (cms) => [
-        cms.originalSrj,
+        structuredClone(cms.originalSrj),
         { traceColorMode: cms.visualizationTraceColorMode },
       ],
       {
@@ -487,6 +498,9 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
             effort: cms.effort,
             preserveTerminalPcbPortIds: true,
             minViaPadDiameter: cms.viaDiameter,
+            regionalCongestionPenaltyByNodeId: new Map(
+              cms.clearanceFeedbackPenaltyByNodeId,
+            ),
             flags: {
               FORCE_CENTER_FIRST: true,
               RIPPING_ENABLED: true,
@@ -702,6 +716,7 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
             viaInPadMaxIterations: 32,
             broadMaxIterations: 12,
             broadPassMultiplier: 3,
+            coupledBroadPassMultipliers: [1, 2],
           },
         ]
       },
@@ -827,18 +842,30 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
     super()
     const srjWithBoardValidObstacleLayers =
       createSrjWithBoardValidObstacleLayers(srj)
-    this.originalSrj = srjWithBoardValidObstacleLayers
+    this.originalSrj = structuredClone(srjWithBoardValidObstacleLayers)
     this.opts = { ...opts }
     const mutableOpts = this.opts
+    this.clearanceFeedbackMaxAttempts =
+      mutableOpts.clearanceFeedbackMaxAttempts ??
+      DEFAULT_CLEARANCE_FEEDBACK_MAX_ATTEMPTS
+    if (
+      !Number.isInteger(this.clearanceFeedbackMaxAttempts) ||
+      this.clearanceFeedbackMaxAttempts < 1
+    ) {
+      throw new Error(
+        "Pipeline7 clearanceFeedbackMaxAttempts must be a positive integer",
+      )
+    }
     this.effort = mutableOpts.effort ?? 1
     // scale with effort so the outer cap never decapitates inner solvers
-    this.MAX_ITERATIONS = 100e6 * this.effort
+    this.MAX_ITERATIONS =
+      100e6 * this.effort * this.clearanceFeedbackMaxAttempts
     this.maxNodeDimension = mutableOpts.maxNodeDimension ?? 16
     this.maxNodeRatio = mutableOpts.maxNodeRatio ?? 6
     this.minNodeArea = mutableOpts.minNodeArea ?? 0.1 ** 2
     this.visualizationTraceColorMode =
       mutableOpts.visualizationTraceColorMode ?? "layer"
-    this.setSimpleRouteJson(srjWithBoardValidObstacleLayers)
+    this.setSimpleRouteJson(structuredClone(this.originalSrj))
 
     if (mutableOpts.capacityDepth === undefined) {
       const boundsWidth = this.srj.bounds.maxX - this.srj.bounds.minX
@@ -860,6 +887,27 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
     this.startTimeOfPhase = {}
     this.endTimeOfPhase = {}
     this.timeSpentOnPhase = {}
+    this.stats.clearanceFeedbackAttemptCount = 1
+    this.stats.clearanceFeedbackRetryCount = 0
+    this.stats.clearanceFeedbackPenalties = []
+  }
+
+  protected getFinalDrcErrors(
+    traces: SimplifiedPcbTraces,
+  ): AutoroutingDrcError[] {
+    const clearance =
+      this.originalSrj.defaultObstacleMargin ??
+      this.originalSrj.minTraceToPadEdgeClearance ??
+      0.1
+    const engine = new AutoroutingDrcEngine(
+      this.srjWithPointPairs! as any,
+      {
+        connMap: this.connMap,
+        traceClearance: clearance,
+        viaClearance: clearance,
+      },
+    )
+    return engine.evaluate(traces as any).errors
   }
 
   private setSimpleRouteJson(srj: SimpleRouteJson) {
@@ -879,6 +927,51 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   currentPipelineStepIndex = 0
   finalDrcErrors: AutoroutingDrcError[] = []
 
+  private resetForClearanceFeedbackRetry(): void {
+    this.preprocessSimpleRouteJsonSolver = undefined
+    this.escapeViaLocationSolver = undefined
+    this.netToPointPairsSolver = undefined
+    this.componentTopologyGeneratorSolver = undefined
+    this.topologyPlanningSolver = undefined
+    this.topologyMergingSolver = undefined
+    this.globalTopologyGeneratorSolver = undefined
+    this.nodeDimensionSubdivisionSolver = undefined
+    this.nodeTargetMerger = undefined
+    this.edgeSolver = undefined
+    this.availableSegmentPointSolver = undefined
+    this.necessaryCrampedPortPointSolver = undefined
+    this.portPointPathingSolver = undefined
+    this.multiSectionPortPointOptimizer = undefined
+    this.uniformPortDistributionSolver = undefined
+    this.highDensityRouteSolver = undefined
+    this.highDensityForceImproveSolver = undefined
+    this.highDensityRepairSolver = undefined
+    this.highDensityStitchSolver = undefined
+    this.globalDrcForceImproveSolver = undefined
+    this.exactGeometryDrcForceImproveSolver = undefined
+    this.singleLayerNodeMerger = undefined
+    this.strawSolver = undefined
+    this.deadEndSolver = undefined
+    this.traceSimplificationSolver = undefined
+    this.traceWidthSolver = undefined
+    this.lengthMatchingPostProcessingSolver = undefined
+    this.powerTraceExpansionSolver = undefined
+    this.componentDetectionSolver = undefined
+    this.activeSubSolver = null
+    this.srjWithEscapeViaLocations = undefined
+    this.srjWithPointPairs = undefined
+    this.capacityNodes = null
+    this.capacityEdges = null
+    this.sharedEdgeSegmentsWithNecessaryCrampedPortPoints = undefined
+    this.highDensityNodePortPoints = undefined
+    this.finalDrcErrors = []
+    this.startTimeOfPhase = {}
+    this.endTimeOfPhase = {}
+    this.timeSpentOnPhase = {}
+    this.setSimpleRouteJson(structuredClone(this.originalSrj))
+    this.currentPipelineStepIndex = 0
+  }
+
   computeProgress(): number {
     const activeSubSolverProgress = this.activeSubSolver?.progress ?? 0
     return (
@@ -890,15 +983,6 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   _step() {
     const pipelineStepDef = this.pipelineDef[this.currentPipelineStepIndex]
     if (!pipelineStepDef) {
-      const clearance =
-        this.originalSrj.defaultObstacleMargin ??
-        this.originalSrj.minTraceToPadEdgeClearance ??
-        0.1
-      const engine = new AutoroutingDrcEngine(this.srjWithPointPairs! as any, {
-        connMap: this.connMap,
-        traceClearance: clearance,
-        viaClearance: clearance,
-      })
       const output = this.powerTraceExpansionSolver!.getOutput()
       const replacedTraceIds = new Set(output.flatMap((trace) =>
         trace.__replaces_pcb_trace_id ? [trace.__replaces_pcb_trace_id] : [],
@@ -909,11 +993,44 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
         ),
         ...output,
       ]
-      this.finalDrcErrors = engine.evaluate(traces as any).errors
+      this.finalDrcErrors = this.getFinalDrcErrors(traces)
       this.stats.finalDrcIssueCount = this.finalDrcErrors.length
       if (this.finalDrcErrors.length > 0) {
-        this.failed = true
-        this.error = `Pipeline7 final clearance validation failed: ${this.finalDrcErrors.length} issue(s). ${this.finalDrcErrors[0]!.message}`
+        if (
+          this.stats.clearanceFeedbackAttemptCount >=
+          this.clearanceFeedbackMaxAttempts
+        ) {
+          this.failed = true
+          this.error = `Pipeline7 final clearance validation failed after ${this.stats.clearanceFeedbackAttemptCount} attempt(s): ${this.finalDrcErrors.length} issue(s). ${this.finalDrcErrors[0]!.message}`
+          return
+        }
+        let nodeIds: Set<CapacityMeshNodeId>
+        try {
+          nodeIds = getClearanceFeedbackNodeIds(
+            this.finalDrcErrors,
+            this.capacityNodes ?? [],
+          )
+        } catch (error) {
+          this.failed = true
+          this.error =
+            error instanceof Error
+              ? error.message
+              : `Pipeline7 clearance feedback mapping failed: ${error}`
+          return
+        }
+        for (const nodeId of nodeIds) {
+          this.clearanceFeedbackPenaltyByNodeId.set(
+            nodeId,
+            (this.clearanceFeedbackPenaltyByNodeId.get(nodeId) ?? 0) +
+              CLEARANCE_FEEDBACK_PENALTY_INCREMENT,
+          )
+        }
+        this.stats.clearanceFeedbackAttemptCount += 1
+        this.stats.clearanceFeedbackRetryCount += 1
+        this.stats.clearanceFeedbackPenalties = Array.from(
+          this.clearanceFeedbackPenaltyByNodeId.entries(),
+        )
+        this.resetForClearanceFeedbackRetry()
         return
       }
       this.solved = true
