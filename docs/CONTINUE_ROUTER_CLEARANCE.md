@@ -68,6 +68,8 @@ mandatory. Empty/missing routes must never be interpreted as success.
    the pad error with a worse net-8 trace error (gap about 0.094 mm). Localized
    single-segment distribution was tried and reverted: it still worsened the
    combined geometry. Repair must account for neighboring copper together.
+   `coupled-repair-hd-routes.json` preserves the isolated zero-error HD result;
+   it has not been integrated, exported as a board, or independently accepted.
 5. Implement the congestion hook in source and integrate bounded feedback with
    consistent candidate scoring and explicit failure on exhaustion. Integrate
    coupled repair as a deliberate validated solver operation, not a silent fallback

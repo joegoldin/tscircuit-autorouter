@@ -1,5 +1,9 @@
 # Handoff: make the local autorouter honour clearance and trace width
 
+For the cross-machine checkpoint, start with [CONTINUE_ROUTER_CLEARANCE.md](CONTINUE_ROUTER_CLEARANCE.md).
+It supersedes historical references below to uncommitted scratch files: the probes,
+useful artifacts, and failing coupled-repair reproduction are now committed for handoff.
+
 ## Current status (2026-09-04)
 
 The board is **not ready for manufacture**. The remaining sections describe the
