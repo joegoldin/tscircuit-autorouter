@@ -454,11 +454,7 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
           (this.constructorParams.viaDiameter ?? 0.3) / 2 +
           (this.constructorParams.obstacleMargin ?? 0.15) / 2,
         traceMargin: this.constructorParams.obstacleMargin ?? 0.15,
-        // This likely needs to be corrected to use the actual trace width-
-        // but using anything but 0.1 for traceThickness is causing issues
-        // needs more debugging- repro01 in the high-density-a01 repo
-        // has a good reproduction
-        traceThickness: 0.1, // this.constructorParams.traceWidth ?? 0.15,
+        traceThickness: this.constructorParams.traceWidth ?? 0.15,
         effort: this.effort,
         hyperParameters,
       })
@@ -480,6 +476,8 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
       return new SingleTransitionIntraNodeSolver({
         nodeWithPortPoints: this.nodeWithPortPoints,
         viaDiameter: this.constructorParams.viaDiameter,
+        traceThickness: this.constructorParams.traceWidth,
+        obstacleMargin: this.constructorParams.obstacleMargin,
       }) as any
     }
     if (hyperParameters.THROUGH_OBSTACLE) {
