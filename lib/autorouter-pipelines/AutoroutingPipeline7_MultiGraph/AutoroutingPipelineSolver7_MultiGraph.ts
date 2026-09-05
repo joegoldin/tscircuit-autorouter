@@ -5,6 +5,8 @@ import { ConnectivityMap } from "circuit-json-to-connectivity-map"
 import type { GraphicsObject, Line } from "graphics-debug"
 import { HighDensityForceImproveSolver } from "high-density-repair01/lib/HighDensityForceImproveSolver"
 import {
+  AutoroutingDrcEngine,
+  type AutoroutingDrcError,
   GlobalDrcBranchPortfolioSolver,
   GlobalDrcForceImproveSolver,
 } from "high-density-repair03/lib"
@@ -875,6 +877,7 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   }
 
   currentPipelineStepIndex = 0
+  finalDrcErrors: AutoroutingDrcError[] = []
 
   computeProgress(): number {
     const activeSubSolverProgress = this.activeSubSolver?.progress ?? 0
@@ -887,6 +890,32 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   _step() {
     const pipelineStepDef = this.pipelineDef[this.currentPipelineStepIndex]
     if (!pipelineStepDef) {
+      const clearance =
+        this.originalSrj.defaultObstacleMargin ??
+        this.originalSrj.minTraceToPadEdgeClearance ??
+        0.1
+      const engine = new AutoroutingDrcEngine(this.srjWithPointPairs! as any, {
+        connMap: this.connMap,
+        traceClearance: clearance,
+        viaClearance: clearance,
+      })
+      const output = this.powerTraceExpansionSolver!.getOutput()
+      const replacedTraceIds = new Set(output.flatMap((trace) =>
+        trace.__replaces_pcb_trace_id ? [trace.__replaces_pcb_trace_id] : [],
+      ))
+      const traces = [
+        ...(this.originalSrj.traces ?? []).filter((trace) =>
+          !replacedTraceIds.has(trace.pcb_trace_id),
+        ),
+        ...output,
+      ]
+      this.finalDrcErrors = engine.evaluate(traces as any).errors
+      this.stats.finalDrcIssueCount = this.finalDrcErrors.length
+      if (this.finalDrcErrors.length > 0) {
+        this.failed = true
+        this.error = `Pipeline7 final clearance validation failed: ${this.finalDrcErrors.length} issue(s). ${this.finalDrcErrors[0]!.message}`
+        return
+      }
       this.solved = true
       return
     }
