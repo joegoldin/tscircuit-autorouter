@@ -28,6 +28,7 @@ import {
   TinyHyperGraphSolver,
   type TinyHyperGraphSectionPipelineInput,
   type TinyHyperGraphSectionSolverOptions,
+  type TinyHyperGraphRegionCostAdjustment,
   type TinyHyperGraphSolverOptions,
 } from "tiny-hypergraph/lib/index"
 import type {
@@ -97,6 +98,14 @@ export type DownstreamCandidateSummary = {
   segmentCount: number
   layerChangeCount: number
   changedPreloadedTraceSectionCount: number
+  feedbackRegionCost: number
+}
+
+type CandidatePortfolioSelectionSummary = Omit<
+  DownstreamCandidateSummary,
+  "feedbackRegionCost"
+> & {
+  feedbackRegionCost?: number
 }
 
 type CandidatePortfolioPhase = "primary" | "alternative" | "complete"
@@ -121,7 +130,7 @@ const TRACE_DENSITY_PORTFOLIO_STRONG_CONCENTRATION_RATIO = 0.98
 const TRACE_DENSITY_PORTFOLIO_STRONG_SEGMENT_RATIO = 0.97
 
 export const shouldEvaluateTraceDensityAlternative = (
-  summary: DownstreamCandidateSummary,
+  summary: CandidatePortfolioSelectionSummary,
   routeCount: number,
 ) =>
   summary.nodePfSum > TRACE_DENSITY_PORTFOLIO_MIN_PF_SUM &&
@@ -130,10 +139,17 @@ export const shouldEvaluateTraceDensityAlternative = (
     TRACE_DENSITY_PORTFOLIO_MIN_CONCENTRATION_PER_ROUTE
 
 export const shouldSelectTraceDensityAlternative = (
-  primary: DownstreamCandidateSummary,
-  alternative: DownstreamCandidateSummary,
+  primary: CandidatePortfolioSelectionSummary,
+  alternative: CandidatePortfolioSelectionSummary,
   routeCount: number,
 ) => {
+  if (
+    (alternative.feedbackRegionCost ?? 0) >
+    (primary.feedbackRegionCost ?? 0)
+  ) {
+    return false
+  }
+
   if (
     alternative.changedPreloadedTraceSectionCount >
     primary.changedPreloadedTraceSectionCount
@@ -172,6 +188,7 @@ export const shouldSelectTraceDensityAlternative = (
 }
 
 type TinyRegionMetadata = {
+  capacityMeshNodeId?: CapacityMeshNodeId
   bounds?: TinyBounds
   netId?: number
   NetId?: number
@@ -299,7 +316,39 @@ const getTinyHyperGraphPipelineInput = (
   minViaPadDiameter?: number,
   enablePartialRip = true,
   partialRipEligibilityCount?: number,
+  regionalCongestionPenaltyByNodeId?: ReadonlyMap<
+    CapacityMeshNodeId,
+    number
+  >,
 ): TinyHyperGraphSectionPipelineInput => {
+  for (const [capacityMeshNodeId, penalty] of
+    regionalCongestionPenaltyByNodeId ?? []) {
+    if (!Number.isFinite(penalty) || penalty < 0) {
+      throw new Error(
+        `Invalid regional congestion penalty for ${capacityMeshNodeId}: ${penalty}`,
+      )
+    }
+  }
+  const regionCostAdjustment: TinyHyperGraphRegionCostAdjustment | undefined =
+    regionalCongestionPenaltyByNodeId === undefined
+      ? undefined
+      : ({
+          regionMetadata,
+          sameLayerCrossings,
+          crossLayerCrossings,
+          entryExitLayerChanges,
+        }) => {
+          const capacityMeshNodeId = regionMetadata?.capacityMeshNodeId
+          if (typeof capacityMeshNodeId !== "string") return 0
+          const penalty =
+            regionalCongestionPenaltyByNodeId.get(capacityMeshNodeId) ?? 0
+          return (
+            penalty *
+            (2 * sameLayerCrossings +
+              crossLayerCrossings +
+              entryExitLayerChanges)
+          )
+        }
   const routeCount = serializedHyperGraph.connections?.length ?? 0
   const eligibilityCount = partialRipEligibilityCount ?? routeCount
   const minPartialRipRouteCount =
@@ -313,6 +362,7 @@ const getTinyHyperGraphPipelineInput = (
     eligibilityCount <= maxPartialRipRouteCount
   return {
     serializedHyperGraph,
+    ...(regionCostAdjustment === undefined ? {} : { regionCostAdjustment }),
     createSectionMask: ({ topology }) => new Int8Array(topology.portCount),
     solveGraphOptions: {
       ...getTinyHyperGraphSolveGraphOptions(effort, minViaPadDiameter),
@@ -1079,6 +1129,14 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
           preloadedTraceStats.preloadedAssignmentCount,
         )
       : undefined
+    const tinyPipelineInput = getTinyHyperGraphPipelineInput(
+      serializedGraph,
+      params.effort,
+      params.minViaPadDiameter,
+      !hasPreloadedTraceOccupancy || usePartialRipRoutingWithPreloadedTraces,
+      partialRipEligibilityCount,
+      params.regionalCongestionPenaltyByNodeId,
+    )
     const shouldRunDuplicateCongestedPortPrepass =
       connections.length <= MAX_CONNECTIONS_FOR_DUPLICATE_CONGESTED_PORT_PREPASS
     let graphForTiny = serializedGraph
@@ -1089,6 +1147,12 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
           duplicatePortProximity: 0.05,
           useSerializedPortPenalties: false,
           routeSolveOptions: {
+            ...(tinyPipelineInput.regionCostAdjustment === undefined
+              ? {}
+              : {
+                  regionCostAdjustment:
+                    tinyPipelineInput.regionCostAdjustment,
+                }),
             ...getTinyViaSizeOptions(params.minViaPadDiameter),
             USE_SPARSE_CANDIDATE_STORAGE: false,
             ACCEPT_BEST_SOLUTION_ON_TIMEOUT: true,
@@ -1123,16 +1187,10 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
         (sum, duplicatedPort) => sum + duplicatedPort.duplicatePortIds.length,
         0,
       ) ?? 0
-    const tinyPipelineInput = getTinyHyperGraphPipelineInput(
-      {
-        ...graphForTiny,
-        solvedRoutes: serializedGraph.solvedRoutes,
-      },
-      params.effort,
-      params.minViaPadDiameter,
-      !hasPreloadedTraceOccupancy || usePartialRipRoutingWithPreloadedTraces,
-      partialRipEligibilityCount,
-    )
+    tinyPipelineInput.serializedHyperGraph = {
+      ...graphForTiny,
+      solvedRoutes: serializedGraph.solvedRoutes,
+    }
     this.tinyPipelineSolver =
       new TinyHyperGraphSectionPipelineWithTerminalNetIds(
         tinyPipelineInput,
@@ -1256,6 +1314,7 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
     let squaredNodePortPointCount = 0
     let segmentCount = 0
     let layerChangeCount = 0
+    let feedbackRegionCost = 0
     const regionMetadata = solvedTinySolver.topology.regionMetadata ?? []
 
     for (
@@ -1264,6 +1323,20 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
       regionId++
     ) {
       const segments = solvedTinySolver.state.regionSegments[regionId]
+      const intersectionCache =
+        solvedTinySolver.state.regionIntersectionCaches[regionId]!
+      feedbackRegionCost +=
+        solvedTinySolver.regionCostAdjustment?.({
+          regionId,
+          regionMetadata: regionMetadata[regionId],
+          sameLayerCrossings:
+            intersectionCache.existingSameLayerIntersections,
+          crossLayerCrossings:
+            intersectionCache.existingCrossingLayerIntersections,
+          entryExitLayerChanges:
+            intersectionCache.existingEntryExitLayerChanges,
+          traceCount: intersectionCache.existingSegmentCount,
+        }) ?? 0
       segmentCount += segments.length
       for (const [, fromPortId, toPortId] of segments) {
         if (
@@ -1319,6 +1392,7 @@ export class TinyHypergraphPortPointPathingSolver extends BaseSolver {
       layerChangeCount,
       changedPreloadedTraceSectionCount:
         this.getChangedPreloadedRouteIds(solvedTinySolver).size,
+      feedbackRegionCost,
     }
   }
 
