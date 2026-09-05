@@ -40,6 +40,9 @@ export const createInvalidDirectConnectionRoutes = (
       if (points.length < 2) return []
       const start = points[0]
       const end = points[points.length - 1]
+      const startZ = start.z ?? z ?? 0
+      const endZ = end.z ?? z ?? 0
+      const via = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }
 
       return [
         {
@@ -49,10 +52,13 @@ export const createInvalidDirectConnectionRoutes = (
           traceThickness,
           viaDiameter,
           route: [
-            { x: start.x, y: start.y, z: z ?? start.z ?? 0 },
-            { x: end.x, y: end.y, z: z ?? end.z ?? 0 },
+            { x: start.x, y: start.y, z: startZ },
+            ...(startZ === endZ
+              ? []
+              : [{ ...via, z: startZ }, { ...via, z: endZ }]),
+            { x: end.x, y: end.y, z: endZ },
           ],
-          vias: [],
+          vias: startZ === endZ ? [] : [via],
         },
       ]
     },
