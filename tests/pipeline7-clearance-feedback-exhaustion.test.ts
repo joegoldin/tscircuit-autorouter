@@ -65,4 +65,20 @@ test("fails loudly without readable output after exhausting clearance feedback",
   expect(() => unmappableSolver.getOutputSimplifiedPcbTraces()).toThrow(
     "Cannot get output before solving is complete",
   )
+
+  const defaultLimitSolver = new AutoroutingPipelineSolver7_MultiGraph(srj, {
+    cacheProvider: null,
+  })
+  expect(defaultLimitSolver.clearanceFeedbackMaxAttempts).toBe(12)
+  for (const invalidMaxAttempts of [0, -1, 1.5]) {
+    expect(
+      () =>
+        new AutoroutingPipelineSolver7_MultiGraph(srj, {
+          cacheProvider: null,
+          clearanceFeedbackMaxAttempts: invalidMaxAttempts,
+        }),
+    ).toThrow(
+      "Pipeline7 clearanceFeedbackMaxAttempts must be a positive integer",
+    )
+  }
 })
