@@ -1,5 +1,43 @@
 # Handoff: make the local autorouter honour clearance and trace width
 
+## Current status (2026-09-04)
+
+The board is **not ready for manufacture**. The remaining sections describe the
+original investigation; they are not a statement that the current branch passes.
+The fixture actually specifies a 0.5 mm via pad, not the 0.45 mm stated below.
+
+Verified source fixes since the initial handoff:
+
+- `a8b20c84`: evaluate at the declared clearance and pin the repair-library fork
+  at `joegoldin/high-density-repair03@ee5b9c23`. That fork fixes the three
+  hard-coded broad-repulsion margins. No Bun patches or install-time source edits.
+- `6215f13c`: pass the actual trace width to A03 and copper dimensions/clearance
+  to the single-transition solver.
+- `b7b3f015`: preserve both endpoint layers and explicit vias in direct repair
+  candidates. These remain invalid candidates, not accepted final routes.
+- `a217e761`: do not reject same-net branch crossings as impossible single-layer
+  geometry.
+- `7f5081b3`: evaluate final, post-expansion copper and fail Pipeline 7 if any
+  clearance violations remain. This is a clearance gate, not a complete
+  connectivity/board-edge validator.
+
+Before the last two commits, the original fixture produced 148 routes with eight
+remaining exact clearance errors, predominantly true crossings near the MCU.
+The width-enabled board build exported to KiCad with 17 error-level violations
+(7 clearance, 8 crossing, 2 shorting), zero unconnected items, and a failing
+`tsci check shorts`. Zero unconnected items does not make that board valid.
+
+Seven focused regressions (54 assertions) and `bun run build` passed after the
+last two commits. The repair library's full suite has four snapshot failures,
+also reproduced on its unmodified baseline; do not silently update snapshots.
+
+Current investigation: feed detailed routing violations back into coarse
+planning. Per-port congestion penalties persist, but can reduce route count
+while increasing required vias. Scratch probes are intentionally uncommitted;
+no retry or congestion policy has been adopted into production. Preserve true
+copper sizes and clearance throughout. Do not replace this with autoplacement,
+manual copper repairs, or geometry inflation.
+
 Branch: `jlcpcb-clearance` on https://github.com/joegoldin/tscircuit-autorouter (fork of
 tscircuit/tscircuit-autorouter, npm `@tscircuit/capacity-autorouter`, forked at v0.0.875).
 
