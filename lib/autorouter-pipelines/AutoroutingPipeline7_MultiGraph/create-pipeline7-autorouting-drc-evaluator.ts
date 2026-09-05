@@ -11,9 +11,6 @@ import {
   createPipeline7HdRoutesToSimplifiedPcbTracesConverter,
 } from "./convertPipeline7HdRoutesToSimplifiedPcbTraces"
 
-const AUTOROUTING_TRACE_CLEARANCE = 0.1
-const AUTOROUTING_VIA_CLEARANCE = 0.1
-
 /**
  * Scores Pipeline7 repair candidates with reusable autorouting-only DRC state.
  *
@@ -26,6 +23,10 @@ export const createPipeline7AutoroutingDrcEvaluator = (
     originalSrj: SimpleRouteJson
   },
 ): DrcEvaluator => {
+  const clearance =
+    conversionOptions.originalSrj.defaultObstacleMargin ??
+    conversionOptions.originalSrj.minTraceToPadEdgeClearance ??
+    0.1
   const engineSrj = {
     ...conversionOptions.srjWithPointPairs,
     minTraceWidth: conversionOptions.originalSrj.minTraceWidth,
@@ -40,11 +41,11 @@ export const createPipeline7AutoroutingDrcEvaluator = (
     Math.max(
       getViaDimensions(conversionOptions.originalSrj).padDiameter,
       engineSrj.minTraceWidth,
-    ) + Math.max(AUTOROUTING_TRACE_CLEARANCE, AUTOROUTING_VIA_CLEARANCE)
+    ) + clearance
   const engine = new AutoroutingDrcEngine(engineSrj as RepairSimpleRouteJson, {
     connMap: conversionOptions.connMap,
-    traceClearance: AUTOROUTING_TRACE_CLEARANCE,
-    viaClearance: AUTOROUTING_VIA_CLEARANCE,
+    traceClearance: clearance,
+    viaClearance: clearance,
     spatialCellSize,
   })
   const convertCandidateRoutes =
