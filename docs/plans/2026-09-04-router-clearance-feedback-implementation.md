@@ -8,6 +8,15 @@
 
 **Tech Stack:** TypeScript, Bun test runner, Tiny Hypergraph, tscircuit capacity autorouter Pipeline 7, high-density-repair03, tsci 0.0.2463/core 0.0.1837, KiCad 10.
 
+**Execution priority, updated by Joe on 2026-09-05:** Finish the in-flight
+shared-edge discovery, bounded via/pad movement and Tiny timeout-feasibility
+corrections, then publish/pin matching fork source and regenerate the actual ESP
+board. Remaining generic fixture failures are diagnostic backlog unless their
+mechanism is shown to block this design. Record measured before/after board
+results and fix actual board blockers through completion. Keep all acceptance
+requirements below; do not defer the first actual-board rerun until every
+unrelated fixture is repaired.
+
 ## Global Constraints
 
 - Start every routing attempt from the untouched SimpleRouteJson.

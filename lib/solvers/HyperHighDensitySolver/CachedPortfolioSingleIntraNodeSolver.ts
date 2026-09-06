@@ -141,6 +141,10 @@ export class CachedPortfolioSingleIntraNodeSolver
       traceWidth: roundCoord(this.constructorParams.traceWidth ?? 0.15),
       viaDiameter: roundCoord(this.constructorParams.viaDiameter ?? 0.3),
       obstacleMargin: roundCoord(this.constructorParams.obstacleMargin ?? 0.15),
+      enforceConfiguredClearance:
+        this.constructorParams.enforceConfiguredClearance ?? false,
+      useConfiguredCopperDimensions:
+        this.constructorParams.useConfiguredCopperDimensions ?? false,
       // TODO connMap
     }
 

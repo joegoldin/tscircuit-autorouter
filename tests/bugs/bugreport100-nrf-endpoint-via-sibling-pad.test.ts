@@ -180,9 +180,11 @@ const cleanPreloadedTrace: SimplifiedPcbTrace = {
 
 test("bugreport100 rejects a movable preloaded via beside a foreign QFN pad", async () => {
   const legacySolver = createSolver(false)
-  legacySolver.solve()
+  while (!legacySolver.forceImproveSolver && !legacySolver.failed) {
+    legacySolver.step()
+  }
   expect(legacySolver.failed).toBe(false)
-  const legacyTraces = toTraces(legacySolver.getOutput())
+  const legacyTraces = toTraces(legacySolver.highDensitySolver.routes)
   const legacyRfTrace = legacyTraces.find(
     (trace) => trace.connection_name === RF_CONNECTION,
   )!

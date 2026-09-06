@@ -72,6 +72,7 @@ export class IntraNodeRouteSolver extends BaseSolver {
   viaDiameter: number
   traceWidth: number
   obstacleMargin: number
+  enforceConfiguredClearance: boolean
   captureSearchDebug: boolean
   rerouteAttemptsByConnection: Map<string, number>
 
@@ -99,6 +100,8 @@ export class IntraNodeRouteSolver extends BaseSolver {
     viaDiameter?: number
     traceWidth?: number
     obstacleMargin?: number
+    enforceConfiguredClearance?: boolean
+    useConfiguredCopperDimensions?: boolean
     captureSearchDebug?: boolean
     obstacles?: Obstacle[]
     layerCount?: number
@@ -114,6 +117,8 @@ export class IntraNodeRouteSolver extends BaseSolver {
     this.viaDiameter = params.viaDiameter ?? 0.3
     this.traceWidth = params.traceWidth ?? 0.15
     this.obstacleMargin = params.obstacleMargin ?? 0.15
+    this.enforceConfiguredClearance =
+      params.enforceConfiguredClearance ?? false
     this.captureSearchDebug = params.captureSearchDebug ?? true
     const unsolvedConnectionsMap: Map<string, ConnectionPoint[]> = new Map()
     this.rootConnectionNameByConnectionName = new Map()
@@ -264,6 +269,7 @@ export class IntraNodeRouteSolver extends BaseSolver {
       viaDiameter: this.viaDiameter,
       traceThickness: this.traceWidth,
       obstacleMargin: this.obstacleMargin,
+      enforceConfiguredClearance: this.enforceConfiguredClearance,
       captureSearchDebug: this.captureSearchDebug,
     }
   }
@@ -354,10 +360,13 @@ export class IntraNodeRouteSolver extends BaseSolver {
     const availableZ = this.getAvailableZLayers()
 
     for (const route of this.solvedRoutes) {
-      // accepted node solutions must meet the configured margin, not a fixed 0.1 mm
+      // Strict routing cannot accept a candidate checked only against the
+      // historical fixed 0.1 mm post-route margin.
       const margin =
         route.viaDiameter / 2 +
-        Math.max(this.POSTROUTE_VIA_TRACE_CLEARANCE, this.obstacleMargin)
+        (this.enforceConfiguredClearance
+          ? Math.max(this.POSTROUTE_VIA_TRACE_CLEARANCE, this.obstacleMargin)
+          : this.POSTROUTE_VIA_TRACE_CLEARANCE)
 
       for (const via of route.vias) {
         for (const z of availableZ) {

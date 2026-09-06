@@ -87,7 +87,7 @@
     "recharts": "^2.15.1",
     "tailwind-merge": "^3.2.0",
     "terser": "^5.43.1",
-    "tiny-hypergraph": "git+https://github.com/joegoldin/tiny-hypergraph.git#3805fb25a89a66ab60a50ac777aa208e5d37691a",
+    "tiny-hypergraph": "git+https://github.com/joegoldin/tiny-hypergraph.git#472eca4ef155e2638a7ed4ed59ca332559b935e2",
     "tiny-hypergraph-poly": "git+https://github.com/tscircuit/tiny-hypergraph.git#7b93b4c",
     "tsup": "^8.3.6",
     "typescript": "^5.9.3",
@@ -97,7 +97,7 @@
     "zdwiel-dataset": "git+https://github.com/dwiel/tscircuit-benchmark.git#be36518b5bf51755dae92c230061ab3cf4e3e063",
     "high-density-repair01": "git+https://github.com/tscircuit/high-density-repair01.git#01f9fe901ac6f691c325bb25d993f52d916a98a1",
     "high-density-repair02": "https://codeload.github.com/tscircuit/high-density-repair02/tar.gz/2afc0cbba3bf2f7eb6b9cd33615d21e9ad9352d4",
-    "high-density-repair03": "git+https://github.com/joegoldin/high-density-repair03.git#ebc863a62bf9d82b40e788c4cd6bece70268a3d0",
+    "high-density-repair03": "git+https://github.com/joegoldin/high-density-repair03.git#600f728793a9f0bb1b952a807b6a5c82c9dd2e13",
     "@tscircuit/high-density-a01": "git+https://github.com/tscircuit/high-density-a01.git#9a3a3d",
     "@tscircuit/high-density-b01": "git+https://github.com/tscircuit/high-density-b01.git#e651cab6c314e7aab6df31fd6067277436f67148"
   },

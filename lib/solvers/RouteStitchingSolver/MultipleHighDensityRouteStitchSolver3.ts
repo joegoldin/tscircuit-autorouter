@@ -48,9 +48,20 @@ export class MultipleHighDensityRouteStitchSolver3 extends BaseSolver {
   private canStitchBetweenTerminals(params: {
     connectionName: string
     hdRoutes: HighDensityIntraNodeRoute[]
-    start: Point3
-    end: Point3
-  }) {
+    start: Point3 & { pcb_port_id?: string }
+    end: Point3 & { pcb_port_id?: string }
+    requireCompletePath?: boolean
+  }): boolean {
+    const endpoints = params.hdRoutes.flatMap((route) => [
+      { point: route.route[0], portId: route.startPcbPortId },
+      { point: route.route[route.route.length - 1], portId: route.endPcbPortId },
+    ])
+    if (params.requireCompletePath && ![params.start, params.end].every((terminal) => endpoints.some(
+      ({ point, portId }) => point.z === terminal.z &&
+        distance(point, terminal) <= MAX_TERMINAL_STITCH_GAP_DISTANCE_3 &&
+        (!terminal.pcb_port_id || !portId || portId === terminal.pcb_port_id),
+    ))) return false
+
     const stitchSolver = new SingleHighDensityRouteStitchSolver3({
       connectionName: params.connectionName,
       hdRoutes: params.hdRoutes,
@@ -82,14 +93,46 @@ export class MultipleHighDensityRouteStitchSolver3 extends BaseSolver {
         stitchSolver.mergedHdRoute.route.length - 1
       ]
 
-    const directDistance =
-      distance(routeStart, params.start) + distance(routeEnd, params.end)
-    const swappedDistance =
-      distance(routeStart, params.end) + distance(routeEnd, params.start)
+    if (!params.requireCompletePath) {
+      const directDistance =
+        distance(routeStart, params.start) + distance(routeEnd, params.end)
+      const swappedDistance =
+        distance(routeStart, params.end) + distance(routeEnd, params.start)
+      return Math.min(directDistance, swappedDistance) <=
+        MAX_TERMINAL_STITCH_GAP_DISTANCE_3
+    }
+    if (!stitchSolver.solved) return false
 
-    return (
-      Math.min(directDistance, swappedDistance) <=
-      MAX_TERMINAL_STITCH_GAP_DISTANCE_3
+    const matchesTerminal = (
+      point: Point3,
+      portId: string | undefined,
+      terminal: Point3 & { pcb_port_id?: string },
+    ): boolean =>
+      point.z === terminal.z &&
+      distance(point, terminal) <= 1e-6 &&
+      (!this.preserveTerminalPcbPortIds || !terminal.pcb_port_id ||
+        portId === terminal.pcb_port_id)
+    const merged = stitchSolver.mergedHdRoute
+    const reachesTerminals =
+      (matchesTerminal(routeStart, merged.startPcbPortId, params.start) &&
+        matchesTerminal(routeEnd, merged.endPcbPortId, params.end)) ||
+      (matchesTerminal(routeStart, merged.startPcbPortId, params.end) &&
+        matchesTerminal(routeEnd, merged.endPcbPortId, params.start))
+
+    // Single can report solved after dropping an unbridgeable remainder.
+    return reachesTerminals && params.hdRoutes.every((route) =>
+      route.route.every((point, index) => {
+        const previousPoint = route.route[Math.max(0, index - 1)]
+        return merged.route.some((mergedPoint, mergedIndex) => {
+          if (mergedPoint.z !== point.z || distance(mergedPoint, point) > 1e-6)
+            return false
+          if (index === 0 || (previousPoint.z === point.z &&
+            distance(previousPoint, point) <= 1e-6)) return true
+          return [merged.route[mergedIndex - 1], merged.route[mergedIndex + 1]]
+            .some((neighbor) => neighbor && neighbor.z === previousPoint.z &&
+              distance(neighbor, previousPoint) <= 1e-6)
+        })
+      }),
     )
   }
 
@@ -121,8 +164,12 @@ export class MultipleHighDensityRouteStitchSolver3 extends BaseSolver {
       start: params.start,
       end: params.end,
       endpointIndex: this.endpointIndex,
+      preserveTerminalPcbPortIds: this.preserveTerminalPcbPortIds,
       canStitchBetweenTerminals: (selection) =>
-        this.canStitchBetweenTerminals(selection),
+        this.canStitchBetweenTerminals({
+          ...selection,
+          requireCompletePath: this.preserveTerminalPcbPortIds,
+        }),
     })
 
     const includesSharedRootBridge = pathRoutes.some(
@@ -302,8 +349,12 @@ export class MultipleHighDensityRouteStitchSolver3 extends BaseSolver {
         start,
         end,
         endpointIndex: this.endpointIndex,
+        preserveTerminalPcbPortIds: this.preserveTerminalPcbPortIds,
         canStitchBetweenTerminals: (selection) =>
-          this.canStitchBetweenTerminals(selection),
+          this.canStitchBetweenTerminals({
+            ...selection,
+            requireCompletePath: this.preserveTerminalPcbPortIds,
+          }),
       })
 
       this.unsolvedRoutes.push({
@@ -390,13 +441,78 @@ export class MultipleHighDensityRouteStitchSolver3 extends BaseSolver {
               start,
               end,
               endpointIndex: this.endpointIndex,
+              preserveTerminalPcbPortIds: this.preserveTerminalPcbPortIds,
               canStitchBetweenTerminals: (selection) =>
-                this.canStitchBetweenTerminals(selection),
+                this.canStitchBetweenTerminals({
+                  ...selection,
+                  requireCompletePath: this.preserveTerminalPcbPortIds,
+                }),
             }),
           start,
           end,
         },
       ]
+    })
+
+    // Shared-root bridges above are selected from the full canonical input.
+    // Only remove secondary islands after all requested paths retain coverage.
+    const plannedRoutes = this.unsolvedRoutes
+    const completePathsByConnection = new Map<string, UnsolvedRoute3 | null>()
+    const completeCoverageByConnection = new Map<string, boolean>()
+    this.unsolvedRoutes = plannedRoutes.filter((plannedRoute) => {
+      const siblings = plannedRoutes.filter(
+        (route) => route.connectionName === plannedRoute.connectionName,
+      )
+      if (siblings.length < 2) return true
+
+      const connection = params.connections.find(
+        (connection) => connection.name === plannedRoute.connectionName,
+      )!
+      const terminals = connection.pointsToConnect.map((point) => ({
+        ...point,
+        z: mapLayerNameToZ(getConnectionPointLayer(point), params.layerCount),
+      }))
+      if (!completePathsByConnection.has(connection.name)) {
+        completePathsByConnection.set(connection.name, siblings.find((route) =>
+          this.canStitchBetweenTerminals({
+            ...route,
+            start: terminals[0],
+            end: terminals[1],
+            requireCompletePath: true,
+          }),
+        ) ?? null)
+      }
+      const completePath = completePathsByConnection.get(connection.name)
+      if (!completePath || completePath === plannedRoute) return true
+
+      const rootConnectionName = connection.__rootConnectionNames?.[0] ??
+        plannedRoute.hdRoutes[0]?.rootConnectionName
+      const otherConnections = params.connections.filter((other) =>
+        other.name !== connection.name && rootConnectionName &&
+        (other.__rootConnectionNames?.[0] ?? canonicalHdRoutes.find(
+          (route) => route.connectionName === other.name,
+        )?.rootConnectionName) === rootConnectionName,
+      )
+      return !otherConnections.every((other) => {
+        if (completeCoverageByConnection.has(other.name))
+          return completeCoverageByConnection.get(other.name)!
+        const otherRoutes = plannedRoutes.filter(
+          (route) => route.connectionName === other.name,
+        )
+        if (otherRoutes.length !== 1) return false
+        const otherTerminals = other.pointsToConnect.map((point) => ({
+          ...point,
+          z: mapLayerNameToZ(getConnectionPointLayer(point), params.layerCount),
+        }))
+        const complete = this.canStitchBetweenTerminals({
+          ...otherRoutes[0],
+          start: otherTerminals[0],
+          end: otherTerminals[1],
+          requireCompletePath: true,
+        })
+        completeCoverageByConnection.set(other.name, complete)
+        return complete
+      })
     })
 
     this.MAX_ITERATIONS = 100e3

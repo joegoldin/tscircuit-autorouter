@@ -5,6 +5,7 @@ import {
   type SimplifiedPcbTraces as RepairSimplifiedPcbTraces,
 } from "high-density-repair03/lib"
 import type { SimpleRouteJson } from "lib/types"
+import { addApproximatingRectsToSrj } from "lib/utils/addApproximatingRectsToSrj"
 import { getViaDimensions } from "lib/utils/getViaDimensions"
 import {
   type ConvertPipeline7HdRoutesOptions,
@@ -29,6 +30,8 @@ export const createPipeline7AutoroutingDrcEvaluator = (
     0.1
   const engineSrj = {
     ...conversionOptions.srjWithPointPairs,
+    obstacles: addApproximatingRectsToSrj(conversionOptions.originalSrj)
+      .obstacles,
     minTraceWidth: conversionOptions.originalSrj.minTraceWidth,
     minViaDiameter:
       conversionOptions.originalSrj.minViaDiameter ??

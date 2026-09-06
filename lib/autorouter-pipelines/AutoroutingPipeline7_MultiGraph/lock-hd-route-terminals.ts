@@ -1,5 +1,6 @@
 import type { SimpleRouteConnection } from "lib/types"
 import type { HighDensityRoute } from "lib/types/high-density-types"
+import { mapLayerNameToZ } from "lib/utils/mapLayerNameToZ"
 
 /**
  * Restores stitched route endpoints to their authoritative PCB port positions
@@ -14,6 +15,8 @@ export const lockHdRouteTerminals = (
     string,
     Pick<HighDensityRoute, "startPcbPortId" | "endPcbPortId">
   > = new Map(hdRoutes.map((route) => [route.connectionName, route])),
+  layerCount?: number,
+  terminalLayerIndicesByPcbPortId?: ReadonlyMap<string, ReadonlySet<number>>,
 ): HighDensityRoute[] => {
   const connectionByName = new Map(
     connections.map((connection) => [connection.name, connection]),
@@ -80,6 +83,33 @@ export const lockHdRouteTerminals = (
       ? terminalByPcbPortId.get(terminalIdentity.endPcbPortId)
       : undefined
 
+    if (
+      layerCount !== undefined &&
+      startTerminal &&
+      "layer" in startTerminal &&
+      hdRoute.route[0]!.z !== mapLayerNameToZ(startTerminal.layer, layerCount) &&
+      !terminalLayerIndicesByPcbPortId
+        ?.get(startTerminal.pcb_port_id!)
+        ?.has(hdRoute.route[0]!.z)
+    ) {
+      throw new Error(
+        `Cannot lock PCB terminals for "${hdRoute.connectionName}": start terminal layer changed`,
+      )
+    }
+    if (
+      layerCount !== undefined &&
+      endTerminal &&
+      "layer" in endTerminal &&
+      hdRoute.route.at(-1)!.z !== mapLayerNameToZ(endTerminal.layer, layerCount) &&
+      !terminalLayerIndicesByPcbPortId
+        ?.get(endTerminal.pcb_port_id!)
+        ?.has(hdRoute.route.at(-1)!.z)
+    ) {
+      throw new Error(
+        `Cannot lock PCB terminals for "${hdRoute.connectionName}": end terminal layer changed`,
+      )
+    }
+
     const route = hdRoute.route.map((point, pointIndex) => {
       if (pointIndex === 0 && startTerminal) {
         return {
@@ -102,6 +132,15 @@ export const lockHdRouteTerminals = (
       return interiorPoint
     })
 
-    return { ...hdRoute, route }
+    return {
+      ...hdRoute,
+      ...(terminalIdentity.startPcbPortId
+        ? { startPcbPortId: terminalIdentity.startPcbPortId }
+        : {}),
+      ...(terminalIdentity.endPcbPortId
+        ? { endPcbPortId: terminalIdentity.endPcbPortId }
+        : {}),
+      route,
+    }
   })
 }

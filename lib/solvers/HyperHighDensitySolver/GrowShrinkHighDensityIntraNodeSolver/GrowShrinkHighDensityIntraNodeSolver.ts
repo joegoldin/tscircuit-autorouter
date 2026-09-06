@@ -154,21 +154,30 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
       this.constructorParams
     const s = this.scaleFactor
     const center = this.nodeWithPortPoints.center
-    // The node is routed at s times its size and the solution is scaled back by 1/s, so the
-    // copper sizes, the margin and the obstacles must be scaled up by s too; otherwise every
-    // clearance in the accepted solution is 1/s of what was asked for.
+    const enforceConfiguredClearance =
+      portfolioParams.enforceConfiguredClearance ?? false
+    // Strict routing scales every physical input with the node so shrinking
+    // the solution cannot reduce the requested clearance by 1/s.
     this.activeSubSolver = new PortfolioSingleIntraNodeSolver({
       ...portfolioParams,
       nodeWithPortPoints: scaleNodeWithPortPoints(this.nodeWithPortPoints, s),
-      traceWidth: (portfolioParams.traceWidth ?? 0.15) * s,
-      viaDiameter: (portfolioParams.viaDiameter ?? 0.3) * s,
-      obstacleMargin: (portfolioParams.obstacleMargin ?? 0.15) * s,
-      obstacles: portfolioParams.obstacles?.map((obstacle) => ({
-        ...obstacle,
-        center: scalePoint(obstacle.center, center, s),
-        width: obstacle.width * s,
-        height: obstacle.height * s,
-      })),
+      traceWidth:
+        (portfolioParams.traceWidth ?? 0.15) *
+        (enforceConfiguredClearance ? s : 1),
+      viaDiameter:
+        (portfolioParams.viaDiameter ?? 0.3) *
+        (enforceConfiguredClearance ? s : 1),
+      obstacleMargin:
+        (portfolioParams.obstacleMargin ?? 0.15) *
+        (enforceConfiguredClearance ? s : 1),
+      obstacles: enforceConfiguredClearance
+        ? portfolioParams.obstacles?.map((obstacle) => ({
+            ...obstacle,
+            center: scalePoint(obstacle.center, center, s),
+            width: obstacle.width * s,
+            height: obstacle.height * s,
+          }))
+        : portfolioParams.obstacles,
     })
     if (this.constructorParams.maxInnerIterationsPerGrowthAttempt) {
       this.activeSubSolver.MAX_ITERATIONS =
@@ -180,15 +189,20 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
     const solvedRoutes =
       this.scaleFactor === 1
         ? solver.solvedRoutes
-        : solver.solvedRoutes.map((route) => ({
-            ...scaleRoute(
+        : solver.solvedRoutes.map((route) => {
+            const scaledRoute = scaleRoute(
               route,
               this.nodeWithPortPoints.center,
               1 / this.scaleFactor,
-            ),
-            traceThickness: route.traceThickness / this.scaleFactor,
-            viaDiameter: route.viaDiameter / this.scaleFactor,
-          }))
+            )
+            return this.constructorParams.enforceConfiguredClearance
+              ? {
+                  ...scaledRoute,
+                  traceThickness: route.traceThickness / this.scaleFactor,
+                  viaDiameter: route.viaDiameter / this.scaleFactor,
+                }
+              : scaledRoute
+          })
     if (
       this.constructorParams.growShrinkSolutionValidator &&
       !this.constructorParams.growShrinkSolutionValidator(solvedRoutes)

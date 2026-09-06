@@ -54,6 +54,8 @@ export class HighDensitySolver extends BaseSolver {
   viaDiameter: number
   traceWidth: number
   obstacleMargin: number
+  enforceConfiguredClearance: boolean
+  useConfiguredCopperDimensions: boolean
   effort: number
   obstacles: Obstacle[]
   layerCount: number
@@ -88,6 +90,8 @@ export class HighDensitySolver extends BaseSolver {
     viaDiameter,
     traceWidth,
     obstacleMargin,
+    enforceConfiguredClearance,
+    useConfiguredCopperDimensions,
     effort,
     nodePfById,
     obstacles,
@@ -105,6 +109,8 @@ export class HighDensitySolver extends BaseSolver {
     viaDiameter?: number
     traceWidth?: number
     obstacleMargin?: number
+    enforceConfiguredClearance?: boolean
+    useConfiguredCopperDimensions?: boolean
     effort?: number
     obstacles?: Obstacle[]
     layerCount?: number
@@ -130,6 +136,10 @@ export class HighDensitySolver extends BaseSolver {
     this.viaDiameter = viaDiameter ?? this.defaultViaDiameter
     this.traceWidth = traceWidth ?? this.defaultTraceThickness
     this.obstacleMargin = obstacleMargin ?? 0.15
+    this.enforceConfiguredClearance =
+      enforceConfiguredClearance ?? false
+    this.useConfiguredCopperDimensions =
+      useConfiguredCopperDimensions ?? false
     this.obstacles = obstacles ?? []
     this.layerCount = layerCount ?? 2
     this.useGrowShrinkHighDensityIntraNodeSolver =
@@ -378,6 +388,8 @@ export class HighDensitySolver extends BaseSolver {
       viaDiameter: this.viaDiameter,
       traceWidth: this.traceWidth,
       obstacleMargin: this.obstacleMargin,
+      enforceConfiguredClearance: this.enforceConfiguredClearance,
+      useConfiguredCopperDimensions: this.useConfiguredCopperDimensions,
       effort: this.effort,
       obstacles: this.obstacles,
       layerCount: this.layerCount,

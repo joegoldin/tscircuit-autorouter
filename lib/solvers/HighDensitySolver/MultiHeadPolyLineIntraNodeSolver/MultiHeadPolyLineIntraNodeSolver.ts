@@ -74,6 +74,7 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
     traceWidth?: number
     /** Required copper-to-copper gap between connections (default 0.1) */
     obstacleMargin?: number
+    enforceConfiguredClearance?: boolean
   }) {
     super()
     this.MAX_ITERATIONS = 10e3
@@ -89,9 +90,14 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
     this.viaDiameter = params.viaDiameter ?? this.viaDiameter
     this.traceWidth = params.traceWidth ?? this.traceWidth
     this.obstacleMargin = params.obstacleMargin ?? this.obstacleMargin
-    // copper may not come closer than half the margin to the node edge (neighbouring nodes
-    // contribute the other half); the padding is measured from the copper edge
-    this.BOUNDARY_PADDING = Math.max(this.BOUNDARY_PADDING, this.obstacleMargin / 2)
+    if (params.enforceConfiguredClearance) {
+      // Copper may not come closer than half the margin to the node edge;
+      // neighbouring nodes contribute the other half.
+      this.BOUNDARY_PADDING = Math.max(
+        this.BOUNDARY_PADDING,
+        this.obstacleMargin / 2,
+      )
+    }
 
     // TODO swap with more sophisticated grid in SingleHighDensityRouteSolver
     this.cellSize = this.nodeWithPortPoints.width / 1024

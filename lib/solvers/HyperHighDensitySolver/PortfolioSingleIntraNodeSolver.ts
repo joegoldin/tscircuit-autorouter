@@ -412,6 +412,8 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
           traceWidth: this.constructorParams.traceWidth,
           viaDiameter: this.constructorParams.viaDiameter,
           obstacleMargin: this.constructorParams.obstacleMargin,
+          enforceConfiguredClearance:
+            this.constructorParams.enforceConfiguredClearance,
         })
         ineligibleSolver.failed = true
         ineligibleSolver.error =
@@ -433,8 +435,12 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         viaDiameter: this.constructorParams.viaDiameter ?? 0.3,
         viaMinDistFromBorder:
           (this.constructorParams.viaDiameter ?? 0.3) / 2 +
-          (this.constructorParams.obstacleMargin ?? 0.15) / 2,
-        traceMargin: this.constructorParams.obstacleMargin ?? 0.15,
+          (this.constructorParams.enforceConfiguredClearance
+            ? (this.constructorParams.obstacleMargin ?? 0.15) / 2
+            : 0),
+        traceMargin: this.constructorParams.enforceConfiguredClearance
+          ? (this.constructorParams.obstacleMargin ?? 0.15)
+          : 0.1,
         traceThickness: this.constructorParams.traceWidth ?? 0.15,
         effort: this.effort,
         hyperParameters: {
@@ -452,8 +458,12 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         viaDiameter: this.constructorParams.viaDiameter ?? 0.3,
         viaMinDistFromBorder:
           (this.constructorParams.viaDiameter ?? 0.3) / 2 +
-          (this.constructorParams.obstacleMargin ?? 0.15) / 2,
-        traceMargin: this.constructorParams.obstacleMargin ?? 0.15,
+          (this.constructorParams.enforceConfiguredClearance
+            ? (this.constructorParams.obstacleMargin ?? 0.15) / 2
+            : 0),
+        traceMargin: this.constructorParams.enforceConfiguredClearance
+          ? (this.constructorParams.obstacleMargin ?? 0.15)
+          : 0.1,
         traceThickness: this.constructorParams.traceWidth ?? 0.15,
         effort: this.effort,
         hyperParameters,
@@ -476,8 +486,12 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
       return new SingleTransitionIntraNodeSolver({
         nodeWithPortPoints: this.nodeWithPortPoints,
         viaDiameter: this.constructorParams.viaDiameter,
-        traceThickness: this.constructorParams.traceWidth,
-        obstacleMargin: this.constructorParams.obstacleMargin,
+        ...(this.constructorParams.useConfiguredCopperDimensions ?? false
+          ? {
+              traceThickness: this.constructorParams.traceWidth,
+              obstacleMargin: this.constructorParams.obstacleMargin,
+            }
+          : {}),
       }) as any
     }
     if (hyperParameters.THROUGH_OBSTACLE) {
@@ -498,6 +512,8 @@ export class PortfolioSingleIntraNodeSolver extends HyperParameterSupervisorSolv
         viaDiameter: this.constructorParams.viaDiameter,
         traceWidth: this.constructorParams.traceWidth,
         obstacleMargin: this.constructorParams.obstacleMargin,
+        enforceConfiguredClearance:
+          this.constructorParams.enforceConfiguredClearance,
       }) as any
     }
     return new CachedIntraNodeRouteSolver({

@@ -17,10 +17,11 @@ test("single-transition portfolio candidate preserves copper width and via clear
     traceWidth: 0.3,
     viaDiameter: 0.5,
     obstacleMargin: 0.4,
+    useConfiguredCopperDimensions: true,
   })
   const candidate = portfolio.generateSolver({
     CLOSED_FORM_SINGLE_TRANSITION: true,
-  }) as SingleTransitionIntraNodeSolver
+  }) as unknown as SingleTransitionIntraNodeSolver
   candidate.solve()
   expect(candidate.solved).toBe(true)
   expect(candidate.solvedRoutes[0]!.traceThickness).toBe(0.3)

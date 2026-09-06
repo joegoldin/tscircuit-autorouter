@@ -34,6 +34,7 @@ import {
   NodeWithPortPoints,
 } from "lib/types/high-density-types"
 import { applyNetColorsToGraphicsObject } from "lib/utils/applyNetColorsToGraphicsObject"
+import { addApproximatingRectsToSrj } from "lib/utils/addApproximatingRectsToSrj"
 import { combineVisualizations } from "lib/utils/combineVisualizations"
 import {
   type TraceColorMode,
@@ -72,6 +73,7 @@ import { TraceSimplificationSolver } from "../../solvers/TraceSimplificationSolv
 import { TraceWidthSolver } from "../../solvers/TraceWidthSolver/TraceWidthSolver"
 import { PreprocessSimpleRouteJsonSolver } from "../AutoroutingPipeline4_TinyHypergraph/PreprocessSimpleRouteJsonSolver"
 import { MergedComponentTopologyView } from "./MergedComponentTopologyView"
+import { getTerminalLayerIndicesByPcbPortId } from "../AutoroutingPipeline9_PreloadedTraceGraph/getTerminalLayerIndicesByPcbPortId"
 import { PowerTraceExpansionSolver } from "./PowerTraceExpansionSolver"
 import { convertPipeline7HdRoutesToSimplifiedPcbTraces } from "./convertPipeline7HdRoutesToSimplifiedPcbTraces"
 import { createPipeline7AutoroutingDrcEvaluator } from "./create-pipeline7-autorouting-drc-evaluator"
@@ -91,6 +93,7 @@ interface CapacityMeshSolverOptions {
   visualizationTraceColorMode?: TraceColorMode
   powerTraceExpansion?: PowerTraceExpanderOptions
   clearanceFeedbackMaxAttempts?: number
+  enforceConfiguredClearance?: boolean
 }
 export type AutoroutingPipelineSolverOptions = CapacityMeshSolverOptions
 
@@ -349,6 +352,8 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
           componentDetectionOutput: cms.componentDetectionSolver!.getOutput(),
           viaDiameter: cms.viaDiameter,
           obstacleMargin: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+          enforceConfiguredClearance:
+            cms.opts.enforceConfiguredClearance ?? false,
         },
       ],
       {
@@ -572,6 +577,10 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
           viaDiameter: cms.viaDiameter,
           traceWidth: cms.minTraceWidth,
           obstacleMargin: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+          enforceConfiguredClearance:
+            cms.opts.enforceConfiguredClearance ?? false,
+          useConfiguredCopperDimensions:
+            cms.opts.enforceConfiguredClearance ?? false,
           obstacles: cms.srj.obstacles,
           layerCount: cms.srj.layerCount,
           useGrowShrinkHighDensityIntraNodeSolver: true,
@@ -642,6 +651,11 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
           minTraceToPadEdgeClearance: cms.srj.minTraceToPadEdgeClearance,
           minBoardEdgeClearance: cms.srj.minBoardEdgeClearance,
           enableCrossingViaReduction: true,
+          terminalLayerIndicesByPcbPortId: getTerminalLayerIndicesByPcbPortId(
+            cms.originalSrj.connections,
+            cms.srj.obstacles,
+            cms.srj.layerCount,
+          ),
           iterations: 2,
         },
       ],
@@ -671,6 +685,12 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
               (cms.highDensityStitchSolver?.mergedHdRoutes ?? []).map(
                 (route) => [route.connectionName, route],
               ),
+            ),
+            cms.srj.layerCount,
+            getTerminalLayerIndicesByPcbPortId(
+              cms.originalSrj.connections,
+              cms.srj.obstacles,
+              cms.srj.layerCount,
             ),
           ),
           connMap: cms.connMap,
@@ -899,14 +919,15 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
       this.originalSrj.defaultObstacleMargin ??
       this.originalSrj.minTraceToPadEdgeClearance ??
       0.1
-    const engine = new AutoroutingDrcEngine(
-      this.srjWithPointPairs! as any,
-      {
-        connMap: this.connMap,
-        traceClearance: clearance,
-        viaClearance: clearance,
-      },
-    )
+    const engineSrj = {
+      ...this.srjWithPointPairs!,
+      obstacles: addApproximatingRectsToSrj(this.originalSrj).obstacles,
+    }
+    const engine = new AutoroutingDrcEngine(engineSrj as any, {
+      connMap: this.connMap,
+      traceClearance: clearance,
+      viaClearance: clearance,
+    })
     return engine.evaluate(traces as any).errors
   }
 
@@ -1315,16 +1336,33 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
   }
 
   _getOutputHdRoutes(): HighDensityRoute[] {
+    let hdRoutes: HighDensityRoute[]
     if (this.lengthMatchingPostProcessingSolver) {
-      const { hdRoutes } = this.lengthMatchingPostProcessingSolver.getOutput()
-      return hdRoutes
+      ;({ hdRoutes } = this.lengthMatchingPostProcessingSolver.getOutput())
+    } else {
+      hdRoutes =
+        this.exactGeometryDrcForceImproveSolver?.getOutput() ??
+        this.globalDrcForceImproveSolver?.getOutput() ??
+        this.traceWidthSolver?.getHdRoutesWithWidths() ??
+        this.traceSimplificationSolver?.simplifiedHdRoutes ??
+        this.highDensityStitchSolver!.mergedHdRoutes
     }
-    return (
-      this.exactGeometryDrcForceImproveSolver?.getOutput() ??
-      this.globalDrcForceImproveSolver?.getOutput() ??
-      this.traceWidthSolver?.getHdRoutesWithWidths() ??
-      this.traceSimplificationSolver?.simplifiedHdRoutes ??
-      this.highDensityStitchSolver!.mergedHdRoutes
+
+    return lockHdRouteTerminals(
+      hdRoutes,
+      this.netToPointPairsSolver?.newConnections ?? [],
+      new Map(
+        (this.highDensityStitchSolver?.mergedHdRoutes ?? []).map((route) => [
+          route.connectionName,
+          route,
+        ]),
+      ),
+      this.srj.layerCount,
+      getTerminalLayerIndicesByPcbPortId(
+        this.originalSrj.connections,
+        this.srj.obstacles,
+        this.srj.layerCount,
+      ),
     )
   }
 

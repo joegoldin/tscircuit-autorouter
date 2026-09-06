@@ -32,6 +32,7 @@ export interface MultiGraphTopologyPlannerSolverParams {
   componentDetectionOutput?: DetectedComponent[]
   viaDiameter?: number
   obstacleMargin?: number
+  enforceConfiguredClearance?: boolean
   brokenSrj?: {
     componentsAsObstaclesSrj: SimpleRouteJson
     components: SerializedTopologyComponentInput[]
@@ -203,6 +204,12 @@ export class MultiGraphTopologyPlannerSolver extends BasePipelineSolver<MultiGra
    */
   private getGlobalTopologySolverInput() {
     const srj = this.normalizedInput.globalNoConnectionSrj
+    if (!this.inputProblem.enforceConfiguredClearance) {
+      return {
+        simpleRouteJson: srj as any,
+        maxGapFillPasses: 4,
+      }
+    }
     const grow = (this.inputProblem.obstacleMargin ?? 0.15) / 2
     return {
       simpleRouteJson: {

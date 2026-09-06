@@ -1,16 +1,29 @@
 import { expect, test } from "bun:test"
-import { GlobalDrcBranchPortfolioSolver } from "high-density-repair03/lib"
+import {
+  GlobalDrcBranchPortfolioSolver,
+  type HighDensityRoute,
+  type SimpleRouteJson as RepairSimpleRouteJson,
+} from "high-density-repair03/lib"
 import { AutoroutingPipelineSolver7_MultiGraph } from "lib/autorouter-pipelines/AutoroutingPipeline7_MultiGraph/AutoroutingPipelineSolver7_MultiGraph"
 import { createPipeline7AutoroutingDrcEvaluator } from "lib/autorouter-pipelines/AutoroutingPipeline7_MultiGraph/create-pipeline7-autorouting-drc-evaluator"
-import type {
-  HighDensityRoute,
-  SimpleRouteJson,
-  SimplifiedPcbTraces,
-} from "lib/types"
+
+type RoutePoint = HighDensityRoute["route"][number]
+type FixtureRoutePoint = RoutePoint & { traceThickness?: number }
+type FixtureHighDensityRoute = Omit<HighDensityRoute, "route"> & {
+  route: FixtureRoutePoint[]
+}
 
 type OneGapFixture = {
-  srj: SimpleRouteJson
-  routes: HighDensityRoute[]
+  srj: RepairSimpleRouteJson
+  routes: FixtureHighDensityRoute[]
+}
+
+const getPointTraceThickness = (point: RoutePoint): number | undefined => {
+  if (!("traceThickness" in point)) return undefined
+  if (typeof point.traceThickness !== "number") {
+    throw new Error("Route point traceThickness must be a number")
+  }
+  return point.traceThickness
 }
 
 test("repairs the saved one-gap route with the production coupled portfolio", async () => {
@@ -21,15 +34,19 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
     ),
   ).json()) as OneGapFixture
   const sourceArtifactJson = JSON.stringify(fixture)
-  const pipeline = new AutoroutingPipelineSolver7_MultiGraph({
-    ...structuredClone(fixture.srj),
-    traces: [],
-  })
+  const { traces: _fixtureTraces, ...routingInput } = structuredClone(
+    fixture.srj,
+  )
+  const pipeline = new AutoroutingPipelineSolver7_MultiGraph(routingInput)
   while (pipeline.currentPipelineStepIndex < 4 && !pipeline.failed) {
     pipeline.step()
   }
   expect(pipeline.failed).toBe(false)
   const srjWithPointPairs = pipeline.srjWithPointPairs!
+  if (srjWithPointPairs.traces?.length) {
+    throw new Error("One-gap repair input must not contain preloaded traces")
+  }
+  const { traces: _pipelineTraces, ...repairSrj } = srjWithPointPairs
   const drcEvaluator = createPipeline7AutoroutingDrcEvaluator({
     connections: pipeline.netToPointPairsSolver!.newConnections,
     originalConnections: pipeline.originalSrj.connections,
@@ -41,7 +58,7 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
     originalSrj: pipeline.originalSrj,
   })
   const initialResult = drcEvaluator({
-    traces: [] as SimplifiedPcbTraces,
+    traces: [],
     hdRoutes: fixture.routes,
   })
   const initialErrors = Array.isArray(initialResult)
@@ -50,7 +67,7 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
   expect(initialErrors).toHaveLength(1)
 
   const repairSolver = new GlobalDrcBranchPortfolioSolver({
-    srj: srjWithPointPairs as any,
+    srj: repairSrj,
     hdRoutes: fixture.routes,
     connMap: pipeline.connMap,
     effort: pipeline.effort,
@@ -74,7 +91,7 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
 
   const output = repairSolver.getOutput()
   const finalResult = drcEvaluator({
-    traces: [] as SimplifiedPcbTraces,
+    traces: [],
     hdRoutes: output,
   })
   const finalErrors = Array.isArray(finalResult)
@@ -133,7 +150,9 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
       viaDiameter,
       pointWidths: Array.from(
         new Set(
-          route.map((point) => point.traceThickness ?? traceThickness),
+          route.map(
+            (point) => getPointTraceThickness(point) ?? traceThickness,
+          ),
         ),
       ),
     })),
@@ -188,7 +207,7 @@ test("repairs the saved one-gap route with the production coupled portfolio", as
   }
   const [productionParams] = exactStep.getConstructorParams(pipeline)
   const productionResult = productionParams.drcEvaluator({
-    traces: [] as SimplifiedPcbTraces,
+    traces: [],
     hdRoutes: productionParams.hdRoutes,
   })
   const productionErrors = Array.isArray(productionResult)

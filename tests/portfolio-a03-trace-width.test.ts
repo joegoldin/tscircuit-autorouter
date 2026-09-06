@@ -17,6 +17,7 @@ test("A03 portfolio candidate routes with the requested copper width", () => {
     traceWidth: 0.3,
     viaDiameter: 0.45,
     obstacleMargin: 0.15,
+    enforceConfiguredClearance: true,
   })
   const candidate = portfolio.generateSolver({ HIGH_DENSITY_A03: true }) as unknown as HighDensitySolverA03
   candidate.solve()

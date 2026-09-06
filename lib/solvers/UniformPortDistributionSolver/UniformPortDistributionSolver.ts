@@ -1,8 +1,8 @@
+import { getBoundFromCenteredRect } from "@tscircuit/math-utils"
 import { BaseSolver } from "@tscircuit/solver-utils"
 import { GraphicsObject } from "graphics-debug"
 import { Obstacle } from "lib/types"
 import { NodeWithPortPoints } from "lib/types/high-density-types"
-import { getBoundsFromNodeWithPortPoints } from "lib/utils/getBoundsFromNodeWithPortPoints"
 import { InputNodeWithPortPoints } from "../PortPointPathingSolver/PortPointPathingSolver"
 import {
   Bounds,
@@ -51,7 +51,7 @@ export class UniformPortDistributionSolver extends BaseSolver {
     for (const node of input.nodeWithPortPoints) {
       this.mapOfNodeIdToBounds.set(
         node.capacityMeshNodeId,
-        getBoundsFromNodeWithPortPoints(node),
+        getBoundFromCenteredRect(node),
       )
     }
 

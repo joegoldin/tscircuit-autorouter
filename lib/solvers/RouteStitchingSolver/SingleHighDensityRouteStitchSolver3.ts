@@ -55,6 +55,7 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
   end: StitchTerminal
   colorMap: Record<string, string>
   allowedLayerTransitionPointKeys?: Set<string>
+  preserveTerminalPcbPortIds: boolean
   isStitchSegmentClear: IsStitchSegmentClear
   stitchClearanceMode: StitchClearanceMode
 
@@ -85,6 +86,7 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
     this.remainingHdRoutes = canonicalHdRoutes
     this.colorMap = opts.colorMap ?? {}
     this.allowedLayerTransitionPointKeys = opts.allowedLayerTransitionPointKeys
+    this.preserveTerminalPcbPortIds = opts.preserveTerminalPcbPortIds ?? false
     this.isStitchSegmentClear = opts.isStitchSegmentClear
     this.stitchClearanceMode = opts.stitchClearanceMode
 
@@ -345,7 +347,24 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
     let closestRouteIndex = -1
     let matchedOn: "first" | "last" = "first"
     let bestScore = Infinity
+    let bestNonterminalScore = Infinity
+    let bestNonterminalRouteIndex = -1
+    let bestNonterminalMatchedOn: "first" | "last" = "first"
     let blockedByCollision = false
+    const destinationStubEndpoints = this.preserveTerminalPcbPortIds &&
+      this.end.pcb_port_id !== undefined
+      ? this.remainingHdRoutes
+        .filter((route) =>
+          route.startPcbPortId === this.end.pcb_port_id ||
+          route.endPcbPortId === this.end.pcb_port_id
+        )
+        .flatMap((route) => [route.route[0], route.route[route.route.length - 1]])
+      : []
+    const isDestinationStubAdjacent = (point: Point3): boolean =>
+      destinationStubEndpoints.some((stubPoint) =>
+        stubPoint.z === point.z &&
+        distance(stubPoint, point) < GEOMETRIC_TOLERANCE
+      )
 
     for (let i = 0; i < this.remainingHdRoutes.length; i++) {
       const hdRoute = this.remainingHdRoutes[i]
@@ -354,6 +373,10 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
 
       const distToFirst = distance(lastMergedPoint, firstPointInCandidate)
       const distToLast = distance(lastMergedPoint, lastPointInCandidate)
+      const isDestinationStub = this.preserveTerminalPcbPortIds &&
+        this.end.pcb_port_id !== undefined &&
+        (hdRoute.startPcbPortId === this.end.pcb_port_id ||
+          hdRoute.endPcbPortId === this.end.pcb_port_id)
 
       let scoreFirst = Infinity
       if (lastMergedPoint.z === firstPointInCandidate.z) {
@@ -381,10 +404,21 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
         scoreFirst = VIA_PENALTY + distToFirst
       }
 
+      const defersDestinationOnFirst = isDestinationStub || (
+        this.preserveTerminalPcbPortIds &&
+        lastMergedPoint.z !== firstPointInCandidate.z &&
+        isDestinationStubAdjacent(firstPointInCandidate)
+      )
+
       if (scoreFirst < bestScore) {
         bestScore = scoreFirst
         closestRouteIndex = i
         matchedOn = "first"
+      }
+      if (!defersDestinationOnFirst && scoreFirst < bestNonterminalScore) {
+        bestNonterminalScore = scoreFirst
+        bestNonterminalRouteIndex = i
+        bestNonterminalMatchedOn = "first"
       }
 
       let scoreLast = Infinity
@@ -413,11 +447,27 @@ export class SingleHighDensityRouteStitchSolver3 extends BaseSolver {
         scoreLast = VIA_PENALTY + distToLast
       }
 
+      const defersDestinationOnLast = isDestinationStub || (
+        this.preserveTerminalPcbPortIds &&
+        lastMergedPoint.z !== lastPointInCandidate.z &&
+        isDestinationStubAdjacent(lastPointInCandidate)
+      )
+
       if (scoreLast < bestScore) {
         bestScore = scoreLast
         closestRouteIndex = i
         matchedOn = "last"
       }
+      if (!defersDestinationOnLast && scoreLast < bestNonterminalScore) {
+        bestNonterminalScore = scoreLast
+        bestNonterminalRouteIndex = i
+        bestNonterminalMatchedOn = "last"
+      }
+    }
+
+    if (bestNonterminalRouteIndex !== -1) {
+      closestRouteIndex = bestNonterminalRouteIndex
+      matchedOn = bestNonterminalMatchedOn
     }
 
     if (closestRouteIndex === -1) {

@@ -18,11 +18,13 @@ type EndpointEdge = {
   routeIndex: number | null
 }
 
+type StitchTerminal = Point3 & { pcb_port_id?: string }
+
 export type CanStitchBetweenTerminals = (params: {
   connectionName: string
   hdRoutes: HighDensityIntraNodeRoute[]
-  start: Point3
-  end: Point3
+  start: StitchTerminal
+  end: StitchTerminal
 }) => boolean
 
 /**
@@ -213,12 +215,14 @@ export const snapIslandEndpointToNearestTerminal = (params: {
 export const selectRoutesAlongEndpointPath = (params: {
   connectionName: string
   hdRoutes: HighDensityIntraNodeRoute[]
-  start: Point3
-  end: Point3
+  start: StitchTerminal
+  end: StitchTerminal
   endpointIndex: EndpointClusterIndex
   canStitchBetweenTerminals: CanStitchBetweenTerminals
+  preserveTerminalPcbPortIds?: boolean
 }) => {
-  if (params.hdRoutes.length <= 2) return params.hdRoutes
+  if (params.hdRoutes.length <= (params.preserveTerminalPcbPortIds ? 1 : 2))
+    return params.hdRoutes
 
   const canonicalHdRoutes = [...params.hdRoutes].sort(compareRoutes)
 
@@ -303,28 +307,37 @@ export const selectRoutesAlongEndpointPath = (params: {
   }
 
   const queue = [startHash]
-  const visitedHashes = new Set<string>([startHash])
+  const pathCostByHash = new Map<string, number>([[startHash, 0]])
   const prevByHash = new Map<
     string,
     { prevHash: string; routeIndex: number | null }
   >()
 
   while (queue.length > 0) {
+    if (params.preserveTerminalPcbPortIds) {
+      queue.sort((a, b) => pathCostByHash.get(a)! - pathCostByHash.get(b)!)
+    }
     const currentHash = queue.shift()!
     if (currentHash === endHash) break
 
     for (const edge of adjacency.get(currentHash) ?? []) {
-      if (visitedHashes.has(edge.nextHash)) continue
-      visitedHashes.add(edge.nextHash)
+      // Prefer the explicit copper path over shortcuts that skip terminal stubs.
+      const edgeCost = params.preserveTerminalPcbPortIds && edge.routeIndex === null
+        ? canonicalHdRoutes.length + 1
+        : 1
+      const nextCost = pathCostByHash.get(currentHash)! + edgeCost
+      const previousCost = pathCostByHash.get(edge.nextHash)
+      if (previousCost !== undefined && previousCost <= nextCost) continue
+      pathCostByHash.set(edge.nextHash, nextCost)
       prevByHash.set(edge.nextHash, {
         prevHash: currentHash,
         routeIndex: edge.routeIndex,
       })
-      queue.push(edge.nextHash)
+      if (!queue.includes(edge.nextHash)) queue.push(edge.nextHash)
     }
   }
 
-  if (!visitedHashes.has(endHash)) return canonicalHdRoutes
+  if (!pathCostByHash.has(endHash)) return canonicalHdRoutes
 
   const selectedRouteIndexesInReverse: number[] = []
   let cursorHash = endHash
@@ -342,6 +355,19 @@ export const selectRoutesAlongEndpointPath = (params: {
   const selectedHdRoutes = selectedRouteIndexesInReverse
     .reverse()
     .map((routeIndex) => canonicalHdRoutes[routeIndex]!)
+
+  if (params.preserveTerminalPcbPortIds) {
+    const terminalIds = new Set(
+      [params.start.pcb_port_id, params.end.pcb_port_id].filter(Boolean),
+    )
+    // A short tagged stub can collapse to a self-loop in the endpoint graph.
+    for (const route of canonicalHdRoutes) {
+      if ((terminalIds.has(route.startPcbPortId) || terminalIds.has(route.endPcbPortId)) &&
+        !selectedHdRoutes.includes(route)) {
+        selectedHdRoutes.push(route)
+      }
+    }
+  }
 
   if (
     selectedHdRoutes.length > 0 &&

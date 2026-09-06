@@ -52,6 +52,7 @@ export class SingleHighDensityRouteSolver extends BaseSolver {
   viaDiameter: number
   traceThickness: number
   obstacleMargin: number
+  enforceConfiguredClearance: boolean
   layerCount: number
   availableZ: number[]
   minCellSize = 0.05
@@ -116,6 +117,7 @@ export class SingleHighDensityRouteSolver extends BaseSolver {
     viaDiameter?: number
     traceThickness?: number
     obstacleMargin?: number
+    enforceConfiguredClearance?: boolean
     layerCount?: number
     availableZ?: number[]
     futureConnections?: FutureConnection[]
@@ -146,6 +148,8 @@ export class SingleHighDensityRouteSolver extends BaseSolver {
     this.viaDiameter = opts.viaDiameter ?? 0.3
     this.traceThickness = opts.traceThickness ?? 0.15
     this.obstacleMargin = opts.obstacleMargin ?? 0.15
+    this.enforceConfiguredClearance =
+      opts.enforceConfiguredClearance ?? false
     this.layerCount = opts.layerCount ?? 2
     this.availableZ =
       opts.availableZ && opts.availableZ.length > 0
@@ -354,11 +358,12 @@ export class SingleHighDensityRouteSolver extends BaseSolver {
   }
 
   isNodeTooCloseToEdge(node: Node, isVia?: boolean) {
-    // Half the margin on each side of a node edge gives the full margin between the copper of
-    // neighbouring nodes; the copper's own radius must be counted too.
+    // Strict mode counts the trace radius in addition to the half-margin
+    // contributed by each side of a shared node edge.
     const margin = isVia
       ? this.viaDiameter / 2 + this.obstacleMargin / 2
-      : this.traceThickness / 2 + this.obstacleMargin / 2
+      : (this.enforceConfiguredClearance ? this.traceThickness / 2 : 0) +
+        this.obstacleMargin / 2
     const tooClose =
       node.x < this.bounds.minX + margin ||
       node.x > this.bounds.maxX - margin ||

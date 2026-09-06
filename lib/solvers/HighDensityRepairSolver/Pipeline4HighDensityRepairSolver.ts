@@ -10,6 +10,7 @@ import type {
   NodeWithPortPoints,
 } from "lib/types/high-density-types"
 import type { Obstacle } from "lib/types/srj-types"
+import { recomputeViasFromRoute } from "lib/utils/recomputeViasFromRoute"
 import { BaseSolver } from "../BaseSolver"
 import { safeTransparentize } from "../colors"
 
@@ -17,6 +18,13 @@ type RepairSampleEntry = {
   node: NodeWithPortPoints
   routeIndexes: number[]
   sample: DatasetSample
+}
+
+type RouteTransition = {
+  pointIndex: number
+  fromZ: number
+  toZ: number
+  segmentType?: "through_obstacle"
 }
 
 const DEFAULT_REPAIR_MARGIN = 0.2
@@ -135,35 +143,77 @@ const toRepairRoute = (route: HighDensityRoute): RepairHdRoute => ({
   viaDiameter: route.viaDiameter,
 })
 
+const getRouteTransitions = (
+  route: HighDensityRoute["route"],
+): RouteTransition[] => {
+  const transitions: RouteTransition[] = []
+  for (let pointIndex = 1; pointIndex < route.length; pointIndex++) {
+    const previousPoint = route[pointIndex - 1]
+    const point = route[pointIndex]
+    if (previousPoint.z === point.z) continue
+    transitions.push({
+      pointIndex,
+      fromZ: previousPoint.z,
+      toZ: point.z,
+      segmentType: previousPoint.toNextSegmentType,
+    })
+  }
+  return transitions
+}
+
 const fromRepairRoute = (
   route: RepairHdRoute,
   fallbackRoute: HighDensityRoute,
-): HighDensityRoute => ({
-  connectionName: route.connectionName ?? fallbackRoute.connectionName,
-  rootConnectionName:
-    route.rootConnectionName ?? fallbackRoute.rootConnectionName,
-  ...(fallbackRoute.startPcbPortId
-    ? { startPcbPortId: fallbackRoute.startPcbPortId }
-    : {}),
-  ...(fallbackRoute.endPcbPortId
-    ? { endPcbPortId: fallbackRoute.endPcbPortId }
-    : {}),
-  regionId: route.capacityMeshNodeId ?? fallbackRoute.regionId,
-  traceThickness: route.traceThickness ?? fallbackRoute.traceThickness,
-  viaDiameter: route.viaDiameter ?? fallbackRoute.viaDiameter,
-  route:
+): HighDensityRoute => {
+  const routePoints: HighDensityRoute["route"] =
     route.route?.map((point) => ({
       x: point.x,
       y: point.y,
       z: point.z ?? 0,
-    })) ?? fallbackRoute.route,
-  vias:
-    route.vias?.map((via) => ({
-      x: via.x,
-      y: via.y,
-    })) ?? fallbackRoute.vias,
-  jumpers: fallbackRoute.jumpers,
-})
+    })) ?? fallbackRoute.route.map((point) => ({ ...point }))
+  const fallbackTransitions = getRouteTransitions(fallbackRoute.route)
+  const repairedTransitions = getRouteTransitions(routePoints)
+  const transitionsCorrespond =
+    fallbackTransitions.length === repairedTransitions.length &&
+    fallbackTransitions.every((fallbackTransition, index) => {
+      const repairedTransition = repairedTransitions[index]
+      return (
+        fallbackTransition.fromZ === repairedTransition.fromZ &&
+        fallbackTransition.toZ === repairedTransition.toZ
+      )
+    })
+  if (!transitionsCorrespond) {
+    throw new Error(
+      `Pipeline4HighDensityRepairSolver cannot preserve segment metadata after repair changed layer transitions for ${fallbackRoute.connectionName}`,
+    )
+  }
+  for (let index = 0; index < repairedTransitions.length; index++) {
+    if (fallbackTransitions[index].segmentType !== "through_obstacle") continue
+    routePoints[repairedTransitions[index].pointIndex - 1].toNextSegmentType =
+      "through_obstacle"
+  }
+
+  return {
+    connectionName: route.connectionName ?? fallbackRoute.connectionName,
+    rootConnectionName:
+      route.rootConnectionName ?? fallbackRoute.rootConnectionName,
+    ...(fallbackRoute.startPcbPortId
+      ? { startPcbPortId: fallbackRoute.startPcbPortId }
+      : {}),
+    ...(fallbackRoute.endPcbPortId
+      ? { endPcbPortId: fallbackRoute.endPcbPortId }
+      : {}),
+    regionId: route.capacityMeshNodeId ?? fallbackRoute.regionId,
+    traceThickness: route.traceThickness ?? fallbackRoute.traceThickness,
+    viaDiameter: route.viaDiameter ?? fallbackRoute.viaDiameter,
+    route: routePoints,
+    vias: recomputeViasFromRoute(
+      routePoints,
+      "Pipeline4HighDensityRepairSolver",
+    ),
+    jumpers: fallbackRoute.jumpers,
+  }
+}
 
 const getAdjacentObstacles = (
   node: NodeWithPortPoints,
