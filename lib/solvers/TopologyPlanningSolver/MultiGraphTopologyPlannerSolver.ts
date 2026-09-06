@@ -197,10 +197,8 @@ export class MultiGraphTopologyPlannerSolver extends BasePipelineSolver<MultiGra
   /**
    * Adapts the global no-connection SRJ into the RectDiffPipeline input shape.
    *
-   * Obstacles are grown by half the obstacle margin: the mesh nodes then stop half a margin
-   * short of the copper, and the node solvers keep their traces half a margin (plus the trace
-   * radius) inside their node edges, so copper in a node ends up a full margin away from the
-   * obstacle, the same distance it keeps from copper in a neighbouring node.
+   * Shared-edge crossings cannot move inward with an intra-node route, so the
+   * routing-space boundary must reserve the full clearance and initial trace radius.
    */
   private getGlobalTopologySolverInput() {
     const srj = this.normalizedInput.globalNoConnectionSrj
@@ -210,7 +208,9 @@ export class MultiGraphTopologyPlannerSolver extends BasePipelineSolver<MultiGra
         maxGapFillPasses: 4,
       }
     }
-    const grow = (this.inputProblem.obstacleMargin ?? 0.15) / 2
+    const grow =
+      (this.inputProblem.obstacleMargin ?? 0.15) +
+      this.inputProblem.inputSrj.minTraceWidth / 2
     return {
       simpleRouteJson: {
         ...srj,

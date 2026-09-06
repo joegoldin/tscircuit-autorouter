@@ -78,6 +78,7 @@ import { PowerTraceExpansionSolver } from "./PowerTraceExpansionSolver"
 import { convertPipeline7HdRoutesToSimplifiedPcbTraces } from "./convertPipeline7HdRoutesToSimplifiedPcbTraces"
 import { createPipeline7AutoroutingDrcEvaluator } from "./create-pipeline7-autorouting-drc-evaluator"
 import { getPowerTraceExpansionConnectionNames } from "./getPowerTraceExpansionConnectionNames"
+import { filterTargetPortPointsByPhysicalClearance } from "./filterTargetPortPointsByPhysicalClearance"
 import { getClearanceFeedbackNodeIds } from "./get-clearance-feedback-node-ids"
 import { lockHdRouteTerminals } from "./lock-hd-route-terminals"
 import { preparePipeline7PowerTraceExpansionInput } from "./prepare-pipeline7-power-trace-expansion-input"
@@ -481,10 +482,20 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
       "portPointPathingSolver",
       TinyHypergraphPortPointPathingSolver,
       (cms) => {
-        const sharedEdgeSegments =
+        const selectedSharedEdgeSegments =
           cms.sharedEdgeSegmentsWithNecessaryCrampedPortPoints ??
           cms.necessaryCrampedPortPointSolver?.getOutput() ??
           cms.availableSegmentPointSolver!.getOutput()
+        const sharedEdgeSegments = cms.opts.enforceConfiguredClearance
+          ? filterTargetPortPointsByPhysicalClearance({
+              sharedEdgeSegments: selectedSharedEdgeSegments,
+              capacityMeshNodes: cms.capacityNodes!,
+              originalSrj: cms.originalSrj,
+              pairedConnections: cms.srjWithPointPairs!.connections,
+              traceWidth: cms.minTraceWidth,
+              obstacleMargin: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+            })
+          : selectedSharedEdgeSegments
         const { graph, connections } = buildHyperGraph({
           capacityMeshNodes: cms.capacityNodes!,
           layerCount: cms.srj.layerCount,
