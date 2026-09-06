@@ -77,32 +77,104 @@ export class CapacityMeshEdgeSolver extends BaseSolver {
       }
     }
 
+    const targetNodesWithRoutingAccess = this.getTargetNodesWithRoutingAccess(
+      targetNodes,
+      nodeById,
+    )
     for (const targetNode of targetNodes) {
       if (!targetNode._containsObstacle || !targetNode._targetConnectionName) {
         continue
       }
-
-      const hasRoutingEdge = this.edges.some((edge) => {
-        if (!edge.nodeIds.includes(targetNode.capacityMeshNodeId)) return false
-        const otherNodeId =
-          edge.nodeIds[0] === targetNode.capacityMeshNodeId
-            ? edge.nodeIds[1]
-            : edge.nodeIds[0]
-        const otherNode = nodeById.get(otherNodeId)
-        if (!otherNode) return false
-
-        return (
-          !otherNode._containsObstacle &&
-          !otherNode._containsTarget &&
-          this.doNodesHaveSharedLayer(targetNode, otherNode)
-        )
-      })
-      if (hasRoutingEdge) continue
+      if (targetNodesWithRoutingAccess.has(targetNode.capacityMeshNodeId)) {
+        continue
+      }
 
       throw new Error(
         `Target obstacle region "${targetNode.capacityMeshNodeId}" for connection "${targetNode._targetConnectionName}" has no bordering routing edge`,
       )
     }
+  }
+
+  private getTargetNodesWithRoutingAccess(
+    targetNodes: CapacityMeshNode[],
+    nodeById: ReadonlyMap<CapacityMeshNodeId, CapacityMeshNode>,
+  ): Set<CapacityMeshNodeId> {
+    const declaredRoots = new Set(
+      targetNodes.flatMap((node) =>
+        node._targetConnectionName ? [node._targetConnectionName] : [],
+      ),
+    )
+    const rootByNodeId = new Map<CapacityMeshNodeId, string>()
+    for (const node of targetNodes) {
+      if (!node._containsObstacle) continue
+      const roots = new Set(
+        (node._connectedTo ?? []).filter((alias) => declaredRoots.has(alias)),
+      )
+      if (node._targetConnectionName) roots.add(node._targetConnectionName)
+      if (roots.size === 1) {
+        rootByNodeId.set(node.capacityMeshNodeId, [...roots][0]!)
+      }
+    }
+
+    const neighborsByNodeId = new Map<CapacityMeshNodeId, CapacityMeshNode[]>()
+    for (const edge of this.edges) {
+      const [aId, bId] = edge.nodeIds
+      const a = nodeById.get(aId)
+      const b = nodeById.get(bId)
+      if (!a || !b) continue
+      const aNeighbors = neighborsByNodeId.get(aId) ?? []
+      const bNeighbors = neighborsByNodeId.get(bId) ?? []
+      aNeighbors.push(b)
+      bNeighbors.push(a)
+      neighborsByNodeId.set(aId, aNeighbors)
+      neighborsByNodeId.set(bId, bNeighbors)
+    }
+
+    const accessibleNodeIds = new Set<CapacityMeshNodeId>()
+    const visitedByLayer = new Map<number, Set<CapacityMeshNodeId>>()
+    for (const target of targetNodes) {
+      const targetRoot = rootByNodeId.get(target.capacityMeshNodeId)
+      if (!targetRoot) continue
+      for (const z of target.availableZ) {
+        const visited = visitedByLayer.get(z) ?? new Set<CapacityMeshNodeId>()
+        visitedByLayer.set(z, visited)
+        if (visited.has(target.capacityMeshNodeId)) continue
+
+        // Composite pads and subdivisions share an escape, but a layer change
+        // is not proven by a chain of pairwise-compatible target nodes.
+        const component = [target]
+        visited.add(target.capacityMeshNodeId)
+        let hasRoutingEdge = false
+        for (let index = 0; index < component.length; index++) {
+          const current = component[index]!
+          for (const neighbor of neighborsByNodeId.get(
+            current.capacityMeshNodeId,
+          ) ?? []) {
+            if (!neighbor.availableZ.includes(z)) continue
+            if (!neighbor._containsObstacle && !neighbor._containsTarget) {
+              hasRoutingEdge = true
+              continue
+            }
+            if (
+              !neighbor._containsObstacle ||
+              !neighbor._containsTarget ||
+              rootByNodeId.get(neighbor.capacityMeshNodeId) !== targetRoot ||
+              visited.has(neighbor.capacityMeshNodeId)
+            ) {
+              continue
+            }
+            visited.add(neighbor.capacityMeshNodeId)
+            component.push(neighbor)
+          }
+        }
+        if (hasRoutingEdge) {
+          for (const node of component) {
+            accessibleNodeIds.add(node.capacityMeshNodeId)
+          }
+        }
+      }
+    }
+    return accessibleNodeIds
   }
 
   doNodesHaveSharedLayer(

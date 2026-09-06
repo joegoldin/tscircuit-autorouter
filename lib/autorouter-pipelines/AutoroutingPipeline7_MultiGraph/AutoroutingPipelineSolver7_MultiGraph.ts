@@ -379,6 +379,9 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
         return [
           {
             layerCount: cms.srj.layerCount,
+            physicalObstacles: addApproximatingRectsToSrj(
+              structuredClone(cms.originalSrj),
+            ).obstacles,
             nodeGroups: [
               {
                 groupId: "global",
