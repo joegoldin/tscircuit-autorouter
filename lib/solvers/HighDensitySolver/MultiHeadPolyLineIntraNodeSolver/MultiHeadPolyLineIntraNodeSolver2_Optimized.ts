@@ -34,8 +34,7 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
 
   _step() {
     if (this.phase === "setup") {
-      this.setupInitialPolyLines()
-      this.phase = "solving"
+      if (this.setupInitialPolyLines() !== false) this.phase = "solving"
       return
     }
 
@@ -174,6 +173,15 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
       for (let j = i + 1; j < numPolyLines; j++) {
         const polyLine1 = polyLines[i]
         const polyLine2 = polyLines[j]
+
+        if (
+          this.connMap?.areIdsConnected(
+            polyLine1.connectionName,
+            polyLine2.connectionName,
+          )
+        ) {
+          continue
+        }
 
         const points1 = [polyLine1.start, ...polyLine1.mPoints, polyLine1.end]
         const points2 = [polyLine2.start, ...polyLine2.mPoints, polyLine2.end]
@@ -467,6 +475,7 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
         let currentForceY = netForce.fy
         let newX = mPoint.x + currentForceX
         let newY = mPoint.y + currentForceY
+        let viaOutsideBounds = false
 
         if (isVia) {
           // Apply exponential boundary force ONLY to vias
@@ -483,10 +492,23 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
           const minY = this.bounds.minY + forceMargin
           const maxY = this.bounds.maxY - forceMargin
 
-          const distOutsideMinX = minX + radius - mPoint.x // How far the via *center* is past the allowed edge
-          const distOutsideMaxX = mPoint.x - (maxX - radius)
-          const distOutsideMinY = minY + radius - mPoint.y
-          const distOutsideMaxY = mPoint.y - (maxY - radius)
+          if (this.enforceConfiguredClearance) {
+            if (minX > maxX || minY > maxY) {
+              throw new Error(`Cannot move via for "${polyLines[i].connectionName}": empty via-center domain`)
+            }
+            viaOutsideBounds = mPoint.x < minX || mPoint.x > maxX ||
+              mPoint.y < minY || mPoint.y > maxY
+          }
+
+          // Configured routing must use the same radius-plus-padding boundary
+          // as strict acceptance. Keep the historical force field otherwise.
+          const legacyAdditionalRadius = this.enforceConfiguredClearance
+            ? 0
+            : radius
+          const distOutsideMinX = minX + legacyAdditionalRadius - mPoint.x
+          const distOutsideMaxX = mPoint.x - (maxX - legacyAdditionalRadius)
+          const distOutsideMinY = minY + legacyAdditionalRadius - mPoint.y
+          const distOutsideMaxY = mPoint.y - (maxY - legacyAdditionalRadius)
 
           if (distOutsideMinX > 0) {
             boundaryForceX =
@@ -514,9 +536,10 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
           newX = mPoint.x + currentForceX
           newY = mPoint.y + currentForceY
 
-          // Optional: Clamp via position as a hard stop if force isn't enough?
-          // newX = Math.max(this.bounds.minX + radius, Math.min(this.bounds.maxX - radius, newX));
-          // newY = Math.max(this.bounds.minY + radius, Math.min(this.bounds.maxY - radius, newY));
+          if (this.enforceConfiguredClearance) {
+            newX = Math.max(minX, Math.min(maxX, newX))
+            newY = Math.max(minY, Math.min(maxY, newY))
+          }
         } else {
           // For regular points, CLAMP position to bounds + traceWidth/2 padding
           const basePadding = this.traceWidth / 2
@@ -536,7 +559,8 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
         // Check if the *total applied force* (including boundary) is significant
         if (
           Math.abs(currentForceX) < EPSILON &&
-          Math.abs(currentForceY) < EPSILON
+          Math.abs(currentForceY) < EPSILON &&
+          !viaOutsideBounds
         ) {
           continue // No significant force applied in this step, skip update
         }
@@ -550,6 +574,7 @@ export class MultiHeadPolyLineIntraNodeSolver2 extends MultiHeadPolyLineIntraNod
         // Update position if moved significantly from original position
         // Use the calculated (and potentially clamped/boundary-forced) newX, newY
         if (
+          viaOutsideBounds ||
           Math.abs(mPoint.x - newX) > EPSILON ||
           Math.abs(mPoint.y - newY) > EPSILON
         ) {

@@ -80,6 +80,8 @@ import { createPipeline7AutoroutingDrcEvaluator } from "./create-pipeline7-autor
 import { getPowerTraceExpansionConnectionNames } from "./getPowerTraceExpansionConnectionNames"
 import { filterTargetPortPointsByPhysicalClearance } from "./filterTargetPortPointsByPhysicalClearance"
 import { getClearanceFeedbackNodeIds } from "./get-clearance-feedback-node-ids"
+import { assertSelectedTargetPortSpacing } from "lib/solvers/AvailableSegmentPointSolver/assertSelectedTargetPortSpacing"
+import { allocateSelectedTargetPortSpacing } from "lib/solvers/AvailableSegmentPointSolver/allocateSelectedTargetPortSpacing"
 import { lockHdRouteTerminals } from "./lock-hd-route-terminals"
 import { preparePipeline7PowerTraceExpansionInput } from "./prepare-pipeline7-power-trace-expansion-input"
 
@@ -433,6 +435,13 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
           traceWidth: cms.minTraceWidth,
           colorMap: cms.colorMap,
           shouldReturnCrampedPortPoints: true,
+          ...(cms.opts.enforceConfiguredClearance ? {
+            obstacleMargin: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+            targetPortProjection: {
+              originalSrj: cms.originalSrj,
+              pairedConnections: cms.srjWithPointPairs!.connections,
+            },
+          } : {}),
         },
       ],
     ),
@@ -566,9 +575,28 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
       const uniformNodes = cms.uniformPortDistributionSolver?.getOutput() ?? []
       const fallbackNodes =
         cms.portPointPathingSolver?.getOutput().nodesWithPortPoints ?? []
-      const nodePortPointsSource =
+      let nodePortPointsSource =
         uniformNodes.length > 0 ? uniformNodes : fallbackNodes
 
+      if (cms.opts.enforceConfiguredClearance) {
+        nodePortPointsSource = allocateSelectedTargetPortSpacing({
+          nodesWithPortPoints: nodePortPointsSource,
+          capacityNodes: cms.capacityNodes!,
+          sharedEdgeSegments: cms.availableSegmentPointSolver!.getOutput(),
+          originalSrj: cms.originalSrj,
+          pairedConnections: cms.srjWithPointPairs!.connections,
+          traceWidth: cms.minTraceWidth,
+          clearance: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+        })
+        assertSelectedTargetPortSpacing({
+          nodesWithPortPoints: nodePortPointsSource,
+          capacityNodes: cms.capacityNodes!,
+          originalSrj: cms.originalSrj,
+          pairedConnections: cms.srjWithPointPairs!.connections,
+          traceWidth: cms.minTraceWidth,
+          clearance: cms.srj.defaultObstacleMargin ?? cms.srj.minTraceToPadEdgeClearance ?? 0.15,
+        })
+      }
       cms.highDensityNodePortPoints = structuredClone(nodePortPointsSource)
 
       return [

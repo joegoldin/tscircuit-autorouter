@@ -20,6 +20,10 @@ import { BaseSolver } from "../BaseSolver"
 import { safeTransparentize } from "../colors"
 
 export type ConnectionName = string
+export type ViaPossibilitiesFailureReason =
+  | "via-count-exhausted"
+  | "empty-via-center-domain"
+  | "no-alternate-layer"
 
 export interface Segment {
   start: Point3
@@ -64,6 +68,8 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
   NEW_HEAD_WALL_BUFFER_DISTANCE = 0.05
   viaDiameter: number
   connMap?: ConnectivityMap
+  viaCenterBounds?: Bounds
+  failureReason?: ViaPossibilitiesFailureReason
 
   unprocessedConnections: ConnectionName[]
 
@@ -81,12 +87,14 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     hyperParameters,
     viaDiameter,
     connMap,
+    viaCenterBounds,
   }: {
     nodeWithPortPoints: NodeWithPortPoints
     colorMap?: Record<string, string>
     hyperParameters?: ViaPossibilities2HyperParameters
     viaDiameter?: number
     connMap?: ConnectivityMap
+    viaCenterBounds?: Bounds
   }) {
     super()
     this.MAX_ITERATIONS = 100e3
@@ -103,6 +111,7 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     }
     this.viaDiameter = viaDiameter ?? 0.3
     this.connMap = connMap
+    this.viaCenterBounds = viaCenterBounds
 
     this.unprocessedConnections = Array.from(this.portPairMap.keys()).sort()
     if (hyperParameters?.SHUFFLE_SEED) {
@@ -196,6 +205,14 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     }
   }
 
+  _projectViaCenter(point: Point): Point {
+    if (!this.viaCenterBounds) return point
+    return {
+      x: clamp(point.x, this.viaCenterBounds.minX, this.viaCenterBounds.maxX),
+      y: clamp(point.y, this.viaCenterBounds.minY, this.viaCenterBounds.maxY),
+    }
+  }
+
   _step() {
     if (this.solved) return
 
@@ -262,11 +279,22 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     const needsZChange = this.currentHead.z !== targetEnd.z
 
     if (closestIntersection || needsZChange) {
+      if (
+        this.viaCenterBounds &&
+        (this.viaCenterBounds.minX > this.viaCenterBounds.maxX ||
+          this.viaCenterBounds.minY > this.viaCenterBounds.maxY)
+      ) {
+        this.failed = true
+        this.failureReason = "empty-via-center-domain"
+        this.error = `Cannot place via for "${this.currentConnectionName}": empty via-center domain`
+        return
+      }
       this.currentViaCount++
 
       // Check if adding this via would exceed the limit
       if (this.currentViaCount >= this.maxViaCount) {
         this.failed = true
+        this.failureReason = "via-count-exhausted"
         this.error = `Exceeded max via count of ${this.maxViaCount}`
         return
       }
@@ -298,13 +326,15 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
       // Determine the Z level to switch to (the one NOT occupied by the intersected segment)
       const nextZ = this.availableZ.find((z) => z !== intersectedSegmentZ)!
       if (nextZ === undefined) {
+        this.failureReason = "no-alternate-layer"
         this.error = "Could not determine next Z level for via placement!"
         this.failed = true // Mark as failed if Z logic breaks
         return
       }
 
-      const viaPoint1: Point3 = { ...viaXY, z: this.currentHead.z }
-      const viaPoint2: Point3 = { ...viaXY, z: nextZ }
+      const viaCenter = this._projectViaCenter(viaXY)
+      const viaPoint1: Point3 = { ...viaCenter, z: this.currentHead.z }
+      const viaPoint2: Point3 = { ...viaCenter, z: nextZ }
 
       this.currentPath.push(viaPoint1, viaPoint2)
       this.currentHead = viaPoint2
@@ -331,8 +361,9 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
 
       const nextZ = targetEnd.z // Target the destination Z
 
-      const viaPoint1: Point3 = { ...viaXY, z: this.currentHead.z }
-      const viaPoint2: Point3 = { ...viaXY, z: nextZ }
+      const viaCenter = this._projectViaCenter(viaXY)
+      const viaPoint1: Point3 = { ...viaCenter, z: this.currentHead.z }
+      const viaPoint2: Point3 = { ...viaCenter, z: nextZ }
 
       this.currentPath.push(viaPoint1, viaPoint2)
       this.currentHead = viaPoint2

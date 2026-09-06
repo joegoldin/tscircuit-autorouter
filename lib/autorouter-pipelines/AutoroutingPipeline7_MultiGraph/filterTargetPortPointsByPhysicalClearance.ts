@@ -1,9 +1,7 @@
-import { getBoundFromCenteredRect, pointToBoundsDistance } from "@tscircuit/math-utils"
-import { ConnectivityMap } from "circuit-json-to-connectivity-map"
 import type { SharedEdgeSegment } from "lib/solvers/AvailableSegmentPointSolver/AvailableSegmentPointSolver"
 import type { CapacityMeshNode, SimpleRouteConnection, SimpleRouteJson } from "lib/types"
-import { addApproximatingRectsToSrj } from "lib/utils/addApproximatingRectsToSrj"
-import { mapLayerNameToZ } from "lib/utils/mapLayerNameToZ"
+import { createExplicitOwnershipMap } from "lib/utils/createExplicitOwnershipMap"
+import { createPhysicalObstacleClearanceChecker } from "./createPhysicalObstacleClearanceChecker"
 
 interface PhysicalTargetPortInput {
   sharedEdgeSegments: SharedEdgeSegment[]
@@ -12,36 +10,6 @@ interface PhysicalTargetPortInput {
   pairedConnections: SimpleRouteConnection[]
   traceWidth: number
   obstacleMargin: number
-}
-
-/** Links only declared electrical identities, never geometric point hashes. */
-function createExplicitOwnershipMap(
-  srj: SimpleRouteJson,
-  pairedConnections: SimpleRouteConnection[],
-): ConnectivityMap {
-  const connMap = new ConnectivityMap({})
-  const groups: Array<Array<string | undefined>> = [
-    ...[...srj.connections, ...pairedConnections].map((connection) => [
-      connection.name,
-      connection.rootConnectionName,
-      connection.netConnectionName,
-      connection.__netConnectionName,
-      ...(connection.__rootConnectionNames ?? []),
-      ...(connection.mergedConnectionNames ?? []),
-      ...connection.pointsToConnect.flatMap((point) => [point.pcb_port_id, point.pointId]),
-    ]),
-    ...srj.obstacles.map((obstacle) => [
-      obstacle.obstacleId, ...obstacle.connectedTo, ...(obstacle.offBoardConnectsTo ?? []),
-    ]),
-    ...(srj.traces ?? []).map((trace) => [
-      trace.pcb_trace_id, trace.connection_name, ...(trace.connectsTo ?? []),
-    ]),
-  ]
-  for (const group of groups) {
-    const aliases = group.filter((alias): alias is string => Boolean(alias))
-    if (aliases.length > 0) connMap.addConnections([aliases])
-  }
-  return connMap
 }
 
 /**
@@ -59,22 +27,9 @@ export function filterTargetPortPointsByPhysicalClearance({
 }: PhysicalTargetPortInput): SharedEdgeSegment[] {
   const connMap = createExplicitOwnershipMap(originalSrj, pairedConnections)
   const nodeById = new Map(capacityMeshNodes.map((node) => [node.capacityMeshNodeId, node]))
-  // Normalizing all obstacles together merges coincident aliases. Normalize
-  // separately to retain foreign ownership even at identical physical geometry.
-  const physicalObstacles = originalSrj.obstacles.flatMap((obstacle) => {
-    const ownerIds = [obstacle.obstacleId, ...obstacle.connectedTo, ...(obstacle.offBoardConnectsTo ?? [])]
-    const owners = new Set(ownerIds.flatMap((alias) => {
-      const owner = alias ? connMap.getNetConnectedToId(alias) : undefined
-      return owner ? [owner] : []
-    }))
-    return addApproximatingRectsToSrj({ ...originalSrj, connections: [], obstacles: [obstacle] })
-      .obstacles.map((primitive) => ({
-        bounds: getBoundFromCenteredRect(primitive),
-        zLayers: primitive.layers.map((layer) => mapLayerNameToZ(layer, originalSrj.layerCount)),
-        owners,
-      }))
+  const isClear = createPhysicalObstacleClearanceChecker({
+    originalSrj, pairedConnections, obstacleMargin,
   })
-  const requiredDistance = traceWidth / 2 + obstacleMargin
 
   return sharedEdgeSegments.map((segment) => ({
     ...segment,
@@ -96,11 +51,8 @@ export function filterTargetPortPointsByPhysicalClearance({
         targetOwners.every((owners) => owners.has(owner)),
       )
       const commonOwner = commonOwners.length === 1 ? commonOwners[0] : undefined
-      const availableZ = port.availableZ.filter((z) => physicalObstacles.every((obstacle) =>
-        !obstacle.zLayers.includes(z) ||
-        (commonOwner !== undefined && obstacle.owners.has(commonOwner)) ||
-        pointToBoundsDistance(port, obstacle.bounds) >= requiredDistance - 1e-9,
-      ))
+      const availableZ = port.availableZ.filter((z) =>
+        isClear(port, z, commonOwner, traceWidth))
       if (availableZ.length === 0) return []
       return availableZ.length === port.availableZ.length ? [port] : [{ ...port, availableZ }]
     }),

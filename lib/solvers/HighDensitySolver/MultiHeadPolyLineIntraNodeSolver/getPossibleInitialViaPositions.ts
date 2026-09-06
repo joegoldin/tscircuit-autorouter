@@ -1,6 +1,6 @@
 import type { Bounds, Point } from "@tscircuit/math-utils"
 import { getCentroidsFromInnerBoxIntersections } from "./getCentroidsFromInnerBoxIntersections"
-import { generateBinaryCombinations } from "./generateBinaryCombinations"
+import { iterateBinaryCombinations } from "./generateBinaryCombinations"
 import { MHPoint } from "./types1"
 
 type ViaPositionVariantForLinesViaCountVariant = {
@@ -30,14 +30,28 @@ export const getPossibleInitialViaPositions = (params: {
   bounds: Bounds
   viaCountVariants: Array<number[]>
 }): Array<ViaPositionVariantForLinesViaCountVariant> => {
+  return Array.from(iteratePossibleInitialViaPositions(params))
+}
+
+export function* iteratePossibleInitialViaPositions(params: {
+  portPairsEntries: Array<
+    [
+      connectionName: string,
+      {
+        start: Omit<MHPoint, "xMoves" | "yMoves">
+        end: Omit<MHPoint, "xMoves" | "yMoves">
+      },
+    ]
+  >
+  bounds: Bounds
+  viaCountVariants: Array<number[]>
+}): Generator<ViaPositionVariantForLinesViaCountVariant> {
   const { bounds, portPairsEntries, viaCountVariants } = params
 
   const { centroids } = getCentroidsFromInnerBoxIntersections(
     bounds,
     portPairsEntries.map(([_, portPair]) => portPair),
   )
-
-  const result: ViaPositionVariantForLinesViaCountVariant[] = []
 
   for (const viaCountVariant of viaCountVariants) {
     const viaCount = viaCountVariant.reduce((acc, count) => acc + count, 0)
@@ -64,7 +78,7 @@ export const getPossibleInitialViaPositions = (params: {
       }
     }
 
-    const viaPositionVariants = generateBinaryCombinations(
+    const viaPositionVariants = iterateBinaryCombinations(
       viaCount,
       viaPositionSource.length,
     )
@@ -76,12 +90,10 @@ export const getPossibleInitialViaPositions = (params: {
           viaPositions.push(viaPositionSource[i])
         }
       }
-      result.push({
+      yield {
         viaPositions,
         viaCountVariant,
-      })
+      }
     }
   }
-
-  return result
 }

@@ -22,8 +22,8 @@ import { computeViaCountVariants } from "./computeViaCountVariants"
 import { constructMiddlePointsWithViaPositions } from "./constructMiddlePointsWithViaPositions"
 import { detectMultiConnectionClosedFacesWithoutVias } from "./detectMultiConnectionClosedFacesWithoutVias"
 import { getEveryCombinationFromChoiceArray } from "./getEveryCombinationFromChoiceArray"
-import { getEveryPossibleOrdering } from "./getEveryPossibleOrdering"
-import { getPossibleInitialViaPositions } from "./getPossibleInitialViaPositions"
+import { iterateEveryPossibleOrdering } from "./getEveryPossibleOrdering"
+import { iteratePossibleInitialViaPositions } from "./getPossibleInitialViaPositions"
 import { Candidate, MHPoint, PolyLine } from "./types1"
 import { MHPoint2, PolyLine2 } from "./types2"
 import { withinBounds } from "./withinBounds"
@@ -47,16 +47,20 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
   cellSize: number
 
   MAX_CANDIDATES = 50e3
+  INITIAL_CANDIDATE_ATTEMPTS_PER_STEP = 100
 
   viaDiameter: number = 0.3
   obstacleMargin: number = 0.1
   traceWidth: number = 0.15
+  enforceConfiguredClearance: boolean
   availableZ: number[] = []
   uniqueConnections: number = 0
 
   BOUNDARY_PADDING: number
 
   lastCandidate: Candidate | null = null
+  initialCandidateGenerator?: Generator<Candidate | null>
+  initialCandidateAttempts = 0
 
   maxViaCount: number
   minViaCount: number
@@ -90,7 +94,9 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
     this.viaDiameter = params.viaDiameter ?? this.viaDiameter
     this.traceWidth = params.traceWidth ?? this.traceWidth
     this.obstacleMargin = params.obstacleMargin ?? this.obstacleMargin
-    if (params.enforceConfiguredClearance) {
+    this.enforceConfiguredClearance =
+      params.enforceConfiguredClearance ?? false
+    if (this.enforceConfiguredClearance) {
       // Copper may not come closer than half the margin to the node edge;
       // neighbouring nodes contribute the other half.
       this.BOUNDARY_PADDING = Math.max(
@@ -126,10 +132,11 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
     ).size
     this.uniqueConnections = uniqueConnections
 
-    const { numSameLayerCrossings, numEntryExitLayerChanges } =
-      getIntraNodeCrossings(this.nodeWithPortPoints)
+    const { numEntryExitLayerChanges } = getIntraNodeCrossings(
+      this.nodeWithPortPoints,
+    )
 
-    this.minViaCount = numSameLayerCrossings * 2 + numEntryExitLayerChanges
+    this.minViaCount = numEntryExitLayerChanges
     this.maxViaCount = Math.min(
       Math.floor(areaInsideNode / areaPerVia),
       Math.ceil(uniqueConnections * 1.5),
@@ -282,7 +289,37 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
    * for each configuration of vias we want to test, this way when computing
    * neighbors we never consider changing layers
    */
-  setupInitialPolyLines() {
+  setupInitialPolyLines(): boolean | void {
+    this.initialCandidateGenerator ??= this.iterateInitialCandidates()
+    const attemptLimit = this.enforceConfiguredClearance
+      ? this.INITIAL_CANDIDATE_ATTEMPTS_PER_STEP
+      : Number.POSITIVE_INFINITY
+    for (
+      let attempt = 0;
+      attempt < attemptLimit;
+      attempt++
+    ) {
+      const nextCandidate = this.initialCandidateGenerator.next()
+      if (nextCandidate.done) {
+        this.candidates.sort((a, b) => a.f - b.f)
+        return true
+      }
+      this.initialCandidateAttempts++
+      const candidate = nextCandidate.value
+      if (candidate === null) continue
+      if (this.checkIfSolved(candidate)) {
+        this.candidates = [candidate]
+        return true
+      }
+      this.candidates.push(candidate)
+      if (this.candidates.length > this.MAX_CANDIDATES) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private *iterateInitialCandidates(): Generator<Candidate | null> {
     const portPairs: Map<string, { start: MHPoint; end: MHPoint }> = new Map()
     this.nodeWithPortPoints.portPoints.forEach((portPoint) => {
       if (!portPairs.has(portPoint.connectionName)) {
@@ -323,24 +360,15 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
       this.SEGMENTS_PER_POLYLINE,
       this.maxViaCount,
       this.minViaCount,
+      (first, second) =>
+        this.connMap?.areIdsConnected(first, second) ?? false,
     )
 
-    const possibleViaPositions = getPossibleInitialViaPositions({
+    const possibleViaPositions = iteratePossibleInitialViaPositions({
       portPairsEntries,
       viaCountVariants,
       bounds: this.bounds,
     })
-
-    const possibleViaPositionsWithReorderings = []
-    for (const { viaCountVariant, viaPositions } of possibleViaPositions) {
-      const viaPositionsWithReorderings = getEveryPossibleOrdering(viaPositions)
-      for (const viaPositions of viaPositionsWithReorderings) {
-        possibleViaPositionsWithReorderings.push({
-          viaCountVariant,
-          viaPositions,
-        })
-      }
-    }
 
     // MAJOR OPTIMIZATION ISSUE:
     // We currently generate a lot of redundant or invalid viaPositions because
@@ -351,67 +379,59 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
     // ~90% being invalid from empirical testing.
 
     // Convert the portPairs into PolyLines for the initial candidate
-    for (const {
-      viaPositions,
-      viaCountVariant,
-    } of possibleViaPositionsWithReorderings) {
-      const polyLines: PolyLine[] = []
-      let viaPositionIndicesUsed = 0
-      for (let i = 0; i < portPairsEntries.length; i++) {
-        const [connectionName, portPair] = portPairsEntries[i]
-        const viaCount = viaCountVariant[i]
-        const viaPositionsForPolyline = viaPositions.slice(
-          viaPositionIndicesUsed,
-          viaPositionIndicesUsed + viaCount,
-        )
-        const middlePoints = constructMiddlePointsWithViaPositions({
-          start: portPair.start,
-          end: portPair.end,
-          segmentsPerPolyline: this.SEGMENTS_PER_POLYLINE,
-          viaPositions: viaPositionsForPolyline,
-          viaCount,
-          availableZ: this.availableZ,
-        })
-        viaPositionIndicesUsed += viaCount
+    for (const { viaCountVariant, viaPositions } of possibleViaPositions) {
+      for (const orderedViaPositions of iterateEveryPossibleOrdering(
+        viaPositions,
+      )) {
+        const polyLines: PolyLine[] = []
+        let viaPositionIndicesUsed = 0
+        for (let i = 0; i < portPairsEntries.length; i++) {
+          const [connectionName, portPair] = portPairsEntries[i]
+          const viaCount = viaCountVariant[i]
+          const viaPositionsForPolyline = orderedViaPositions.slice(
+            viaPositionIndicesUsed,
+            viaPositionIndicesUsed + viaCount,
+          )
+          const middlePoints = constructMiddlePointsWithViaPositions({
+            start: portPair.start,
+            end: portPair.end,
+            segmentsPerPolyline: this.SEGMENTS_PER_POLYLINE,
+            viaPositions: viaPositionsForPolyline,
+            viaCount,
+            availableZ: this.availableZ,
+          })
+          viaPositionIndicesUsed += viaCount
 
-        polyLines.push({
-          connectionName,
-          start: portPair.start,
-          end: portPair.end,
-          mPoints: middlePoints,
-        })
-      }
-      const hasClosedSameLayerFace =
-        detectMultiConnectionClosedFacesWithoutVias(polyLines, this.bounds)
+          polyLines.push({
+            connectionName,
+            start: portPair.start,
+            end: portPair.end,
+            mPoints: middlePoints,
+          })
+        }
+        const hasClosedSameLayerFace =
+          detectMultiConnectionClosedFacesWithoutVias(polyLines, this.bounds)
 
-      if (hasClosedSameLayerFace) continue
+        if (hasClosedSameLayerFace) {
+          yield null
+          continue
+        }
 
-      const minGaps = this.computeMinGapBtwPolyLines(polyLines)
-      const h = this.computeH({ minGaps, forces: [] })
-      const newCandidate = {
-        polyLines,
-        g: 0,
-        h: h,
-        f: h,
-        viaCount: viaCountVariant.reduce((acc, count) => acc + count, 0),
-        minGaps,
-        // hasClosedSameLayerFace
-      }
+        const minGaps = this.computeMinGapBtwPolyLines(polyLines)
+        const h = this.computeH({ minGaps, forces: [] })
+        const newCandidate = {
+          polyLines,
+          g: 0,
+          h: h,
+          f: h,
+          viaCount: viaCountVariant.reduce((acc, count) => acc + count, 0),
+          minGaps,
+          // hasClosedSameLayerFace
+        }
 
-      if (this.checkIfSolved(newCandidate)) {
-        this.candidates = [newCandidate]
-        return
-      }
-
-      this.candidates.push(newCandidate)
-
-      // NOTE: Might make sense to move this to ._step() so we can
-      // keep generating
-      if (this.candidates.length > this.MAX_CANDIDATES) {
-        return
+        yield newCandidate
       }
     }
-    this.candidates.sort((a, b) => a.f - b.f)
   }
 
   /**
@@ -1097,6 +1117,14 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
   //  Try accepting the best candidate even if normal solving failed.
   // ------------------------------------------------------------------
   tryFinalAcceptance() {
+    if (this.enforceConfiguredClearance) {
+      if (this.lastCandidate && this.checkIfSolved(this.lastCandidate)) {
+        this.solved = true
+        this._setSolvedRoutes()
+      }
+      return
+    }
+
     const minGapTarget =
       this.hyperParameters?.MINIMUM_FINAL_ACCEPTANCE_GAP ?? undefined
     if (
@@ -1119,8 +1147,7 @@ export class MultiHeadPolyLineIntraNodeSolver extends BaseSolver {
 
   _step() {
     if (this.phase === "setup") {
-      this.setupInitialPolyLines()
-      this.phase = "solving"
+      if (this.setupInitialPolyLines() !== false) this.phase = "solving"
       return
     }
     const currentCandidate = this.candidates.shift()

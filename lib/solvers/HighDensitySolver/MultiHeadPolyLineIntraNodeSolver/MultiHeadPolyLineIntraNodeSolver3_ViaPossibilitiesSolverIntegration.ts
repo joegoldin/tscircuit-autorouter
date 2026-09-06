@@ -1,5 +1,5 @@
 import { Point3, distance } from "@tscircuit/math-utils"
-import { ViaPossibilitiesSolver2 } from "lib/solvers/ViaPossibilitiesSolver/ViaPossibilitiesSolver2"
+import { ViaPossibilitiesSolver2, type ViaPossibilitiesFailureReason } from "lib/solvers/ViaPossibilitiesSolver/ViaPossibilitiesSolver2"
 import { MultiHeadPolyLineIntraNodeSolver } from "./MultiHeadPolyLineIntraNodeSolver"
 import { MHPoint, PolyLine, Candidate } from "./types1"
 import { PolyLine2 } from "./types2"
@@ -27,6 +27,8 @@ function factorial(n: number) {
 }
 
 export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNodeSolver2 {
+  seedRejectionCounts: Partial<Record<ViaPossibilitiesFailureReason, number>> = {}
+
   override getSolverName(): string {
     return "MultiHeadPolyLineIntraNodeSolver3"
   }
@@ -40,6 +42,7 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
 
   createInitialCandidateFromSeed(shuffleSeed: number): Candidate | null {
     // 1. Run ViaPossibilitiesSolver2 to get a valid path layout
+    const viaPadding = this.viaDiameter / 2 + this.BOUNDARY_PADDING
     const viaSolver = new ViaPossibilitiesSolver2({
       nodeWithPortPoints: this.nodeWithPortPoints,
       colorMap: this.colorMap,
@@ -49,14 +52,36 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
       },
       viaDiameter: this.viaDiameter,
       connMap: this.connMap,
+      viaCenterBounds: this.enforceConfiguredClearance ? {
+        minX: this.bounds.minX + viaPadding,
+        maxX: this.bounds.maxX - viaPadding,
+        minY: this.bounds.minY + viaPadding,
+        maxY: this.bounds.maxY - viaPadding,
+      } : undefined,
     })
 
     viaSolver.solve()
 
+    if (viaSolver.failed && !viaSolver.solved) {
+      switch (viaSolver.failureReason) {
+        case "via-count-exhausted":
+        case "empty-via-center-domain":
+        case "no-alternate-layer":
+          this.seedRejectionCounts[viaSolver.failureReason] =
+            (this.seedRejectionCounts[viaSolver.failureReason] ?? 0) + 1
+          return null
+      }
+    }
     if (viaSolver.failed || !viaSolver.solved) {
-      this.failed = true
-      this.error = `ViaPossibilitiesSolver2 failed with: ${viaSolver.error}`
-      return null
+      throw new Error(`Unexpected ViaPossibilities result for seed ${shuffleSeed}: solved=${viaSolver.solved}, failed=${viaSolver.failed}, error=${viaSolver.error}`)
+    }
+
+    const completedPaths = [...viaSolver.completedPaths.entries()]
+    const expectedNames = new Set(this.nodeWithPortPoints.portPoints.map((point) => point.connectionName))
+    const completedNames = new Set(completedPaths.map(([name]) => name))
+    if (completedPaths.length !== expectedNames.size || completedNames.size !== completedPaths.length ||
+      [...completedNames].some((name) => !expectedNames.has(name))) {
+      throw new Error(`Invalid ViaPossibilities connection IDs for seed ${shuffleSeed}: expected ${[...expectedNames].join(", ")}; received ${completedPaths.map(([name]) => name).join(", ")}`)
     }
 
     // 2. Convert the completedPaths from ViaPossibilitiesSolver2 into PolyLine[]
@@ -66,16 +91,23 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
     for (const [
       connectionName,
       pathPoints,
-    ] of viaSolver.completedPaths.entries()) {
+    ] of completedPaths) {
       if (pathPoints.length < 2) {
-        console.warn(
-          `Skipping connection "${connectionName}" due to insufficient points (${pathPoints.length}) in ViaPossibilitiesSolver2 path.`,
-        )
-        continue // Should not happen with a valid solution
+        throw new Error(`Invalid ViaPossibilities path for "${connectionName}": expected at least two points`)
       }
 
       const startPoint = pathPoints[0]
       const endPoint = pathPoints[pathPoints.length - 1]
+      const expectedPair = viaSolver.portPairMap.get(connectionName)!
+      if (startPoint.x !== expectedPair.start.x || startPoint.y !== expectedPair.start.y || startPoint.z !== expectedPair.start.z ||
+        endPoint.x !== expectedPair.end.x || endPoint.y !== expectedPair.end.y || endPoint.z !== expectedPair.end.z ||
+        pathPoints.some((point, index) => {
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !this.availableZ.includes(point.z)) return true
+          const previous = pathPoints[index - 1]
+          return previous !== undefined && previous.z !== point.z && (previous.x !== point.x || previous.y !== point.y)
+        })) {
+        throw new Error(`Invalid ViaPossibilities geometry for "${connectionName}" in seed ${shuffleSeed}`)
+      }
       const middlePointsRaw = pathPoints.slice(1, -1)
 
       const mPoints: MHPoint[] = []
@@ -156,11 +188,7 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
         }
 
         if (longestSegmentIndex === -1 || !p1 || !p2) {
-          // Should not happen if there are non-via segments and targetSegmentCount > currentSegments
-          console.warn(
-            `Could not find longest segment for ${connectionName} while trying to reach ${targetSegmentCount} segments.`,
-          )
-          break // Exit loop to prevent infinite loop
+          throw new Error(`Invalid ViaPossibilities path for "${connectionName}": no segment to subdivide`)
         }
 
         // Calculate midpoint and determine segment layer
@@ -204,10 +232,7 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
     }
 
     if (polyLines.length === 0) {
-      this.failed = true
-      this.error = "No valid polylines generated from ViaPossibilitiesSolver2."
-      console.error(this.error)
-      return null
+      throw new Error(`Invalid ViaPossibilities output for seed ${shuffleSeed}: no polylines`)
     }
 
     const minGaps = this.computeMinGapBtwPolyLines(polyLines)
@@ -229,6 +254,7 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
 
   setupInitialPolyLines(): void {
     this.candidates = []
+    this.seedRejectionCounts = {}
     const maxCandidatesToGenerate = Math.min(
       2000,
       factorial(this.uniqueConnections),
@@ -241,6 +267,11 @@ export class MultiHeadPolyLineIntraNodeSolver3 extends MultiHeadPolyLineIntraNod
       if (candidatePolylineHashes.has(newCandidatePolylineHash)) continue
       candidatePolylineHashes.add(newCandidatePolylineHash)
       this.candidates.push(newCandidate)
+    }
+    if (this.candidates.length === 0) {
+      this.failed = true
+      this.error = `All ${maxCandidatesToGenerate} ViaPossibilities seeds rejected: ${JSON.stringify(this.seedRejectionCounts)}`
+      return
     }
     this.candidates.sort((a, b) => a.f - b.f) // Sort in case we add more initial candidates later
   }

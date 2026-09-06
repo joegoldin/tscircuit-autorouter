@@ -7,6 +7,7 @@ import type {
 } from "../../types"
 import type { GraphicsObject } from "graphics-debug"
 import { getNodeEdgeMap } from "../CapacityMeshSolver/getNodeEdgeMap"
+import { projectTargetPortPoints, type TargetPortProjectionContext } from "./projectTargetPortPoints"
 
 export interface PreloadedTracePortAssignment {
   traceId: string
@@ -88,6 +89,7 @@ export class AvailableSegmentPointSolver extends BaseSolver {
 
   colorMap: Record<string, string>
   shouldReturnCrampedPortPoints: boolean
+  targetPortProjection?: TargetPortProjectionContext
 
   // edgeMargin = 0.25
 
@@ -98,6 +100,7 @@ export class AvailableSegmentPointSolver extends BaseSolver {
     obstacleMargin,
     colorMap,
     shouldReturnCrampedPortPoints,
+    targetPortProjection,
   }: {
     nodes: CapacityMeshNode[]
     edges: CapacityMeshEdge[]
@@ -105,6 +108,7 @@ export class AvailableSegmentPointSolver extends BaseSolver {
     obstacleMargin?: number
     colorMap?: Record<string, string>
     shouldReturnCrampedPortPoints: boolean
+    targetPortProjection?: TargetPortProjectionContext
   }) {
     super()
     this.nodes = nodes
@@ -112,6 +116,7 @@ export class AvailableSegmentPointSolver extends BaseSolver {
     this.traceWidth = traceWidth
     this.obstacleMargin = obstacleMargin ?? 0.15
     this.shouldReturnCrampedPortPoints = shouldReturnCrampedPortPoints
+    this.targetPortProjection = targetPortProjection
     // Port spacing: each trace extends traceWidth/2 from center, plus obstacleMargin clearance
     // Center-to-center distance = traceWidth + obstacleMargin
     this.minPortSpacing = this.traceWidth + this.obstacleMargin
@@ -126,6 +131,19 @@ export class AvailableSegmentPointSolver extends BaseSolver {
 
   _step() {
     this.computeAllSharedEdgeSegments()
+    if (this.targetPortProjection) {
+      this.sharedEdgeSegments = projectTargetPortPoints({
+        ...this.targetPortProjection,
+        sharedEdgeSegments: this.sharedEdgeSegments,
+        nodes: this.nodes,
+      })
+      for (const segment of this.sharedEdgeSegments) {
+        this.edgeSegmentMap.set(segment.edgeId, segment)
+        for (const port of segment.portPoints) {
+          this.portPointMap.set(port.segmentPortPointId, port)
+        }
+      }
+    }
     this.solved = true
   }
 
