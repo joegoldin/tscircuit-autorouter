@@ -10,6 +10,7 @@ import type {
 
 export type Pipeline7PowerTraceExpansionInput = SimpleRouteJson & {
   fixedTraces: SimplifiedPcbTraces
+  minViaEdgeToViaEdgeClearance?: number
 }
 
 export const preparePipeline7PowerTraceExpansionInput = ({
@@ -18,12 +19,14 @@ export const preparePipeline7PowerTraceExpansionInput = ({
   currentPreloadedTraces,
   expandedConnectionNames,
   resolveConnectedTraceAliases = false,
+  enforceConfiguredClearance = false,
 }: {
   originalSrj: SimpleRouteJson
   newlyRoutedTraces: SimplifiedPcbTraces
   currentPreloadedTraces?: SimplifiedPcbTraces
   expandedConnectionNames: readonly string[]
   resolveConnectedTraceAliases?: boolean
+  enforceConfiguredClearance?: boolean
 }): Pipeline7PowerTraceExpansionInput => {
   const preloadedTraces = currentPreloadedTraces ?? originalSrj.traces ?? []
   const mutablePreloadedTraceSet = resolveConnectedTraceAliases
@@ -65,6 +68,10 @@ export const preparePipeline7PowerTraceExpansionInput = ({
 
   return {
     ...originalSrj,
+    ...(enforceConfiguredClearance ? {
+      minViaEdgeToViaEdgeClearance: originalSrj.defaultObstacleMargin ??
+        originalSrj.minTraceToPadEdgeClearance ?? 0.1,
+    } : {}),
     traces: [...newlyRoutedTraces, ...mutablePreloadedTraces],
     fixedTraces,
   }

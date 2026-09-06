@@ -113,6 +113,7 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
   scaleFactor = 1
   growthAttempts = 0
   maxGrowthAttempts: number
+  fallbackToInvalidGeometryOnFailure: boolean
 
   constructor(params: GrowShrinkHighDensityIntraNodeSolverParams) {
     super()
@@ -120,11 +121,14 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
     this.nodeWithPortPoints = params.nodeWithPortPoints
     this.maxGrowthAttempts =
       params.maxGrowthAttempts ?? DEFAULT_MAX_GROWTH_ATTEMPTS
+    this.fallbackToInvalidGeometryOnFailure =
+      !params.enforceConfiguredClearance &&
+      (params.fallbackToInvalidGeometryOnFailure ?? false)
     this.MAX_ITERATIONS =
       20_000_000 * (params.effort ?? 1) * (this.maxGrowthAttempts + 1)
 
     if (hasImpossibleSameLayerCrossingGeometry(this.nodeWithPortPoints)) {
-      if (!params.fallbackToInvalidGeometryOnFailure) {
+      if (!this.fallbackToInvalidGeometryOnFailure) {
         this.failed = true
         this.progress = 1
         this.error =
@@ -250,7 +254,7 @@ export class GrowShrinkHighDensityIntraNodeSolver extends BaseSolver {
     this.activeSubSolver = null
 
     if (this.growthAttempts >= this.maxGrowthAttempts) {
-      if (this.constructorParams.fallbackToInvalidGeometryOnFailure) {
+      if (this.fallbackToInvalidGeometryOnFailure) {
         this.solvedRoutes = createInvalidDirectConnectionRoutes(
           this.nodeWithPortPoints,
           this.constructorParams.traceWidth ?? 0.15,

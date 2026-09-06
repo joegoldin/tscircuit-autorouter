@@ -596,7 +596,8 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
           layerCount: cms.srj.layerCount,
           useGrowShrinkHighDensityIntraNodeSolver: true,
           preserveTerminalPcbPortIds: true,
-          growShrinkFallbackToInvalidGeometryOnFailure: true,
+          growShrinkFallbackToInvalidGeometryOnFailure:
+            !(cms.opts.enforceConfiguredClearance ?? false),
           captureSearchDebug: false,
         },
       ]
@@ -855,6 +856,8 @@ export class AutoroutingPipelineSolver7_MultiGraph extends BaseSolver {
             originalSrj: cms.originalSrj,
             newlyRoutedTraces: cms.getPrePowerTraceOutputSimplifiedPcbTraces(),
             expandedConnectionNames: onlyConnectionNames,
+            enforceConfiguredClearance:
+              cms.opts.enforceConfiguredClearance ?? false,
           }),
           {
             allowNewVias: false,

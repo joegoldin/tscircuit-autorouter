@@ -9,6 +9,7 @@ import {
   pointToSegmentDistance,
   segmentToSegmentMinDistance,
 } from "@tscircuit/math-utils"
+import type { ConnectivityMap } from "circuit-json-to-connectivity-map"
 import { GraphicsObject } from "graphics-debug"
 import { NodeWithPortPoints } from "lib/types/high-density-types"
 import { cloneAndShuffleArray } from "lib/utils/cloneAndShuffleArray"
@@ -62,6 +63,7 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
   PLACEHOLDER_WALL_BUFFER_DISTANCE = 0.1
   NEW_HEAD_WALL_BUFFER_DISTANCE = 0.05
   viaDiameter: number
+  connMap?: ConnectivityMap
 
   unprocessedConnections: ConnectionName[]
 
@@ -78,11 +80,13 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     colorMap,
     hyperParameters,
     viaDiameter,
+    connMap,
   }: {
     nodeWithPortPoints: NodeWithPortPoints
     colorMap?: Record<string, string>
     hyperParameters?: ViaPossibilities2HyperParameters
     viaDiameter?: number
+    connMap?: ConnectivityMap
   }) {
     super()
     this.MAX_ITERATIONS = 100e3
@@ -98,6 +102,7 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
       SHUFFLE_SEED: 0,
     }
     this.viaDiameter = viaDiameter ?? 0.3
+    this.connMap = connMap
 
     this.unprocessedConnections = Array.from(this.portPairMap.keys()).sort()
     if (hyperParameters?.SHUFFLE_SEED) {
@@ -203,7 +208,15 @@ export class ViaPossibilitiesSolver2 extends BaseSolver {
     const checkIntersectionsWithPathMap = (
       pathMap: Map<ConnectionName, Point3[]>,
     ) => {
-      for (const path of pathMap.values()) {
+      for (const [connectionName, path] of pathMap.entries()) {
+        if (
+          this.connMap?.areIdsConnected(
+            this.currentConnectionName,
+            connectionName,
+          )
+        ) {
+          continue
+        }
         for (let i = 0; i < path.length - 1; i++) {
           const segment: [Point3, Point3] = [path[i], path[i + 1]]
           // Skip checking intersection if segment is just a via (z change)

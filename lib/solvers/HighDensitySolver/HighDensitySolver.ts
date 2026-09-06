@@ -148,7 +148,8 @@ export class HighDensitySolver extends BaseSolver {
     this.growShrinkMaxInnerIterationsPerGrowthAttempt =
       growShrinkMaxInnerIterationsPerGrowthAttempt
     this.growShrinkFallbackToInvalidGeometryOnFailure =
-      growShrinkFallbackToInvalidGeometryOnFailure ?? false
+      !this.enforceConfiguredClearance &&
+      (growShrinkFallbackToInvalidGeometryOnFailure ?? false)
     this.growShrinkSolutionValidator = growShrinkSolutionValidator
     this.captureSearchDebug = captureSearchDebug ?? true
     this.MAX_ITERATIONS =
